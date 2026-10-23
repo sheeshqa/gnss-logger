@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gnss-logger:stage2:diagnostic:1",
+  "type": "object",
+  "properties": {
+    "schema_id": {
+      "const": "gnss_logger.stage2.diagnostic"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "contract_version": {
+      "const": "stage2.1/v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "utc": {
+      "type": "string",
+      "format": "utc"
+    },
+    "monotonic_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "state": {
+      "enum": [
+        "STARTING",
+        "IDENTIFYING",
+        "RECORDING",
+        "DISCONNECTED",
+        "WAITING",
+        "STORAGE_ERROR",
+        "STOPPING",
+        "STOPPED"
+      ]
+    },
+    "registration": {
+      "enum": [
+        "STARTING",
+        "ACTIVE",
+        "WAITING",
+        "STOPPED_COMPLETE",
+        "PARTIAL",
+        "FAILED"
+      ]
+    },
+    "phase_quality": {
+      "enum": [
+        "NOT_EVALUATED",
+        "NO_DATA",
+        "WARNINGS",
+        "NO_INDICATORS_DETECTED"
+      ]
+    },
+    "hardware_validation": {
+      "enum": [
+        "NOT TESTED"
+      ]
+    },
+    "accounting": {
+      "type": "object",
+      "properties": {
+        "received": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "journal_written": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "journal_synced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unarchived": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "framed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "opaque": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unclassified": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "received_count_exact": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "received",
+        "journal_written",
+        "journal_synced",
+        "pending",
+        "unarchived",
+        "framed",
+        "opaque",
+        "unclassified",
+        "received_count_exact"
+      ],
+      "additionalProperties": false
+    },
+    "last_data_utc": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_rawx_utc": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_sfrbx_utc": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_sync_utc": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "free_disk_bytes": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "queue_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reconnect_attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "gap_events": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "contract_version",
+    "run_id",
+    "attempt_id",
+    "utc",
+    "monotonic_ns",
+    "state",
+    "registration",
+    "phase_quality",
+    "hardware_validation",
+    "accounting",
+    "last_data_utc",
+    "last_rawx_utc",
+    "last_sfrbx_utc",
+    "last_sync_utc",
+    "free_disk_bytes",
+    "queue_bytes",
+    "reconnect_attempts",
+    "gap_events",
+    "errors",
+    "extensions"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "station_id": "UBX1",
+  "provided_by": "generic template; enter local station information separately",
+  "latitude_deg": null,
+  "longitude_deg": null,
+  "altitude_as_provided_m": null,
+  "altitude_reference": null,
+  "msl_altitude_as_provided_m": null,
+  "coordinate_datum": null,
+  "antenna_model": null,
+  "antenna_serial": null,
+  "antenna_height_m": null,
+  "antenna_height_reference": null,
+  "receiver_board": null,
+  "receiver_suffix": null,
+  "receiver_firmware_live": null,
+  "expected_epoch_interval_s": 1,
+  "local_auto_delete": false
+}

@@ -1,0 +1,663 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gnss-logger:stage2:event:1",
+  "type": "object",
+  "properties": {
+    "schema_id": {
+      "const": "gnss_logger.stage2.event"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "contract_version": {
+      "const": "stage2.1/v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "connection_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid-hex"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "utc": {
+      "type": "string",
+      "format": "utc"
+    },
+    "monotonic_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "enum": [
+        "STATE_CHANGED",
+        "CONNECTION_OPENED",
+        "IDENTITY_CHECKED",
+        "CHECKPOINT",
+        "GAP_OPENED",
+        "GAP_CLOSED",
+        "SOURCE_ERROR",
+        "STORAGE_ERROR",
+        "STOP_REQUESTED",
+        "STOPPED",
+        "TIME_DISCONTINUITY",
+        "RECOVERY"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "details": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "contract_version",
+    "run_id",
+    "attempt_id",
+    "sequence",
+    "connection_id",
+    "utc",
+    "monotonic_ns",
+    "kind",
+    "reason",
+    "details"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "STATE_CHANGED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "before": {
+                "enum": [
+                  "STARTING",
+                  "IDENTIFYING",
+                  "RECORDING",
+                  "DISCONNECTED",
+                  "WAITING",
+                  "STORAGE_ERROR",
+                  "STOPPING",
+                  "STOPPED"
+                ]
+              },
+              "after": {
+                "enum": [
+                  "STARTING",
+                  "IDENTIFYING",
+                  "RECORDING",
+                  "DISCONNECTED",
+                  "WAITING",
+                  "STORAGE_ERROR",
+                  "STOPPING",
+                  "STOPPED"
+                ]
+              }
+            },
+            "required": [
+              "before",
+              "after"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "CONNECTION_OPENED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "port": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "port"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "IDENTITY_CHECKED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "identity_status": {
+                "enum": [
+                  "MATCHED",
+                  "REJECTED",
+                  "UNIDENTIFIED"
+                ]
+              },
+              "observed_model": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "match_strength": {
+                "enum": [
+                  "NONE",
+                  "USB_SERIAL",
+                  "USB_TOPOLOGY"
+                ]
+              }
+            },
+            "required": [
+              "identity_status",
+              "observed_model",
+              "match_strength"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "CHECKPOINT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "journal_id": {
+                "type": "string",
+                "format": "uuid-hex"
+              },
+              "synced_offset": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "journal_id",
+              "synced_offset"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "GAP_OPENED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "gap_id": {
+                "type": "string",
+                "format": "uuid-hex"
+              },
+              "last_data_utc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "utc"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "last_rawx_utc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "utc"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "gap_id",
+              "last_data_utc",
+              "last_rawx_utc"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "GAP_CLOSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "gap_id": {
+                "type": "string",
+                "format": "uuid-hex"
+              },
+              "first_data_utc": {
+                "type": "string",
+                "format": "utc"
+              },
+              "first_rawx_utc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "utc"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "host_gap_ns": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "receiver_interval_s": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "uncertainty": {
+                "enum": [
+                  "ESTIMATED",
+                  "UNKNOWN"
+                ]
+              }
+            },
+            "required": [
+              "gap_id",
+              "first_data_utc",
+              "first_rawx_utc",
+              "host_gap_ns",
+              "receiver_interval_s",
+              "uncertainty"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "SOURCE_ERROR"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "minLength": 1
+              },
+              "error_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "component",
+              "error_type",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "STORAGE_ERROR"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "minLength": 1
+              },
+              "error_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "component",
+              "error_type",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "STOP_REQUESTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "STOPPED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "exit_code": {
+                "type": "integer",
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  130
+                ]
+              },
+              "accounting": {
+                "type": "object",
+                "properties": {
+                  "received": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "journal_written": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "journal_synced": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "pending": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unarchived": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "framed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "opaque": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "unclassified": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "received_count_exact": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "received",
+                  "journal_written",
+                  "journal_synced",
+                  "pending",
+                  "unarchived",
+                  "framed",
+                  "opaque",
+                  "unclassified",
+                  "received_count_exact"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "exit_code",
+              "accounting"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "TIME_DISCONTINUITY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "time_binding": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "UNDATED",
+                      "VALID",
+                      "DISCONTINUITY"
+                    ]
+                  },
+                  "receiver_utc": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "utc"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "source": {
+                    "enum": [
+                      "NONE",
+                      "RAWX"
+                    ]
+                  },
+                  "leap_seconds_valid": {
+                    "type": "boolean"
+                  },
+                  "generation": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "status",
+                  "receiver_utc",
+                  "source",
+                  "leap_seconds_valid",
+                  "generation"
+                ],
+                "additionalProperties": false
+              },
+              "previous_rawx_utc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "utc"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "time_binding",
+              "previous_rawx_utc"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "RECOVERY"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "details": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "destination": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "received_count_exact": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "source",
+              "destination",
+              "received_count_exact"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ]
+}

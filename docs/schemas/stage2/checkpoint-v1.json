@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gnss-logger:stage2:checkpoint:1",
+  "type": "object",
+  "properties": {
+    "schema_id": {
+      "const": "gnss_logger.stage2.checkpoint"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "contract_version": {
+      "const": "stage2.1/v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "journal_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "utc": {
+      "type": "string",
+      "format": "utc"
+    },
+    "synced_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_chunk_sequence": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "prefix_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "time_binding": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "UNDATED",
+            "VALID",
+            "DISCONTINUITY"
+          ]
+        },
+        "receiver_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "utc"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": [
+            "NONE",
+            "RAWX"
+          ]
+        },
+        "leap_seconds_valid": {
+          "type": "boolean"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "status",
+        "receiver_utc",
+        "source",
+        "leap_seconds_valid",
+        "generation"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "contract_version",
+    "run_id",
+    "attempt_id",
+    "journal_id",
+    "utc",
+    "synced_offset",
+    "last_chunk_sequence",
+    "prefix_sha256",
+    "time_binding"
+  ],
+  "additionalProperties": false
+}
