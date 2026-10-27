@@ -18,6 +18,7 @@ data/
 reports/
 logs/
 recordings/
+attempts/
 hardware-tests/
 hardware-retest-*/
 *.ubx

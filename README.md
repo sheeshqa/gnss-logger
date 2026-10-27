@@ -1,13 +1,19 @@
-# GNSS Logger 0.4.0.dev1 — контракты Stage 2.1
+# GNSS Logger 0.4.0.dev2 — первичная регистрация Stage 2.2
 
 Read-only CLI для ZED-F9P / ZED-X20P: Serial, Replay и Mock. GUI отсутствует.
 **Stage 1 0.3.0 принят пользователем после аппаратного ретеста PASS WITH LIMITATIONS.**
-Версия 0.4.0.dev1 добавляет архитектурные контракты Stage 2.1; аппаратно не проверена.
-Новые `record`, `status`, `verify`, `recover` пока возвращают **4 / NOT_IMPLEMENTED**,
-не открывают COM, не читают источники и не создают файлы. Длительная запись ещё не реализована.
+Новый `record` реализует таймер/непрерывный режим, один COM reader, ограниченную очередь,
+первичный журнал всех возвращённых байтов и финализацию с SHA-256/учётом/manifest.
+По умолчанию очередь 8 МиБ, sync 1 с. Нужны явные USB binding и модель; посылается только MON-VER.
+`status`, `verify`, `recover` остаются **4 / NOT_IMPLEMENTED**. UTC-ротации/reconnect/recovery пока нет.
+Версия 0.4.0.dev2 аппаратно **NOT TESTED**. Сообщённый пользователем smoke на Win10/Python 3.15.1
+относится к прежнему `serial` 0.4.0.dev1, а не к новому record.
 Существующие команды Stage 1 работают как прежде.
 Описание контрактов: [stage2_1_contracts.md](docs/stage2_1_contracts.md).
 Отчёт подэтапа: [stage2_1_report.md](docs/stage2_1_report.md).
+Stage 2.2: [отчёт](docs/stage2_2_report.md), [обновление и аппаратный тест](docs/stage2_2_hardware_test.md).
+Автономный запуск реального CLI record с явно синтетическим источником без COM:
+`python tools/check_stage2_2_record.py --output <NEW_SIMULATED_DIRECTORY>`.
 Результаты старой версии и сообщение пользователя о RINEX/TEC сохранены отдельно.
 Актуально: [отчёт об исправлениях](docs/stage1_fixes_report.md) и
 [короткий повторный аппаратный тест](docs/stage1_retest.md).

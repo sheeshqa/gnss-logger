@@ -1,5 +1,9 @@
 # GNSS Logger: перенос на Windows 10 x64
 
+Обновление 2026-10-27: этот документ описывает первоначальную установку 0.4.0.dev1.
+Для Stage 2.2 / 0.4.0.dev2, работающего `record` и фактического Python 3.15.1 используйте
+[stage2_2_hardware_test.md](stage2_2_hardware_test.md); не заменяйте рабочую venv на 3.12.
+
 Дата подготовки: 2026-10-23. Версия: **0.4.0.dev1**, Stage 2.1.
 Длительная регистрация ещё не реализована. record/status/verify/recover возвращают
 4 / NOT_IMPLEMENTED. Аппаратный smoke-test ниже использует существующий serial/replay.

@@ -292,9 +292,7 @@ class CLICompatibilityTests(unittest.TestCase):
         self.assertEqual(p.parse_args(['ports']).format,'text')
 
     def test_all_reserved_commands_fail_explicitly_without_any_io(self):
-        commands=[['record','--output','never-created','--port','COM10','--model','ZED-F9P',
-            '--vid','0x1546','--pid','0x01a9','--usb-location','1-9','--until-stopped'],
-            ['status','not-read'],['verify','not-read'],['recover','not-read','--check'],
+        commands=[['status','not-read'],['verify','not-read'],['recover','not-read','--check'],
             ['recover','not-read','--output','never-created']]
         for argv in commands:
             with self.subTest(argv=argv), patch('gnss_logger.cli.open_port') as port, \

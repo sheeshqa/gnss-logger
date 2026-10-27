@@ -1,6 +1,5 @@
-"""Reserved CLI contract. These commands intentionally cannot execute Stage 2 yet."""
+"""Stage 2.2 record plus reserved status/verify/recover contracts."""
 
-from dataclasses import asdict
 import json
 from pathlib import Path
 
@@ -24,7 +23,7 @@ def usb_id(text):
 
 def add_commands(sub, positive):
     description = "Stage 2.1 contracts only. NOT IMPLEMENTED: no hardware access or file operations."
-    record = sub.add_parser("record", help="Stage 2 contract only; recording is not implemented", description=description)
+    record = sub.add_parser("record", help="Stage 2.2 primary recording; no rotation/reconnect", description="Stage 2.2 read-only primary byte recording")
     record.add_argument("--output", type=Path, required=True)
     record.add_argument("--port", required=True, help="Initial port hint, never receiver identity")
     record.add_argument("--model", required=True, choices=("ZED-F9P", "ZED-X20P"))
@@ -40,6 +39,9 @@ def add_commands(sub, positive):
     record.add_argument("--expected-hz", type=positive, default=1)
     record.add_argument("--station", default="UBX1")
     record.add_argument("--retention-policy", choices=("keep_all",), default="keep_all")
+    record.add_argument("--queue-bytes", type=int, default=8*1024*1024)
+    record.add_argument("--sync-interval", type=positive, default=1.0)
+    record.add_argument("--identity-timeout", type=positive, default=5.0)
     for name in ("status", "verify", "recover"):
         command = sub.add_parser(name, help="Stage 2 contract only; operation is not implemented", description=description)
         command.add_argument("path", type=Path, help="Stage 2 recording directory; Stage 1 is never migrated in place")
@@ -50,7 +52,7 @@ def add_commands(sub, positive):
 
 
 def preview(args, parser):
-    """Validate settings; do not touch the file system, COM, metadata or clocks."""
+    """Run record; status/verify/recover remain explicitly unavailable and I/O-free."""
     if args.command == "record":
         try:
             settings = RecordSettings(args.output, args.port,
@@ -58,8 +60,14 @@ def preview(args, parser):
                 args.seconds, args.baud, args.expected_hz, args.station, args.retention_policy)
         except ValueError as error:
             parser.error(str(error))
-        parameters = asdict(settings)
-        parameters["output"] = str(settings.output)
+        if args.queue_bytes<=0:
+            parser.error('--queue-bytes must be positive')
+        from .controller import RecordController, run_with_signals
+        controller=RecordController(queue_bytes=args.queue_bytes,sync_interval=args.sync_interval,
+                                    identity_timeout=args.identity_timeout)
+        code,report=run_with_signals(controller,settings)
+        print(json.dumps(report,ensure_ascii=False,allow_nan=False,indent=2))
+        return code
     else:
         parameters = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     print(json.dumps(dict(contract_version=CONTRACT_VERSION, command=args.command,
