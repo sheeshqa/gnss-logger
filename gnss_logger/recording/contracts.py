@@ -174,6 +174,7 @@ class RecordSettings:
     expected_hz: float = 1.0
     station: str = "UBX1"
     retention_policy: str = "keep_all"
+    daily_root: Optional[Path] = None
 
     def __post_init__(self):
         if not isinstance(self.output, Path) or not self.initial_port.strip() or not isinstance(self.binding, DeviceBinding):
@@ -188,6 +189,14 @@ class RecordSettings:
             raise ValueError("Invalid station identifier")
         if self.retention_policy != "keep_all":
             raise ValueError("Stage 2 cannot automatically delete source data")
+        if self.daily_root is not None:
+            if not isinstance(self.daily_root, Path):
+                raise ValueError('daily_root must be a Path')
+            from ..capture.names import station_component
+            station_component(self.station)
+            primary, daily = self.output.resolve(), self.daily_root.resolve()
+            if primary == daily or primary in daily.parents or daily in primary.parents:
+                raise ValueError('Primary output and daily root must be separate directory trees')
 
 
 @dataclass(frozen=True)

@@ -94,7 +94,12 @@ _PAYLOADS = {
 }
 
 
-def get_schema(kind):
+def get_schema(kind, version=1):
+    if version == 2:
+        from .schema_v2 import get_schema_v2
+        return deepcopy(get_schema_v2(kind))
+    if version != 1:
+        raise ValueError('Unsupported schema version')
     if kind not in _PAYLOADS:
         raise ValueError("Unknown Stage 2 schema kind")
     properties = dict(schema_id=dict(const="gnss_logger.stage2." + kind),
@@ -180,7 +185,10 @@ def validate_record(record):
     if not isinstance(record, dict):
         raise ValueError("Record must be an object")
     kind = record.get("schema_id", "").removeprefix("gnss_logger.stage2.") if isinstance(record.get("schema_id"), str) else ""
-    _validate(record, get_schema(kind), kind)
+    version = record.get('schema_version')
+    if type(version) is not int:
+        raise ValueError('Integer schema version required')
+    _validate(record, get_schema(kind, version), kind)
     if "accounting" in record:
         ByteAccounting(**record["accounting"])
     if "time_binding" in record:
@@ -195,13 +203,21 @@ def validate_record(record):
         raise ValueError("Empty checkpoints have no committed chunk sequence")
     if kind == "event":
         details = record["details"]
-        _validate(details, EVENT_DETAILS[record["kind"]], "event.details")
+        if version == 2:
+            from .schema_v2 import EVENT_DETAILS_V2
+            spec = EVENT_DETAILS_V2.get(record['kind'], EVENT_DETAILS.get(record['kind']))
+        else:
+            spec = EVENT_DETAILS[record['kind']]
+        _validate(details, spec, "event.details")
         if record["kind"] == "STATE_CHANGED":
             require_transition(State(details["before"]),State(details["after"]))
         if "accounting" in details:
             ByteAccounting(**details["accounting"])
         if "time_binding" in details:
             TimeBinding(**details["time_binding"])
+    if version == 2:
+        from .schema_v2 import invariants
+        invariants(record)
     return record
 
 

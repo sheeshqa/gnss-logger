@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gnss-logger:stage2:artifact:2",
+  "type": "object",
+  "properties": {
+    "schema_id": {
+      "const": "gnss_logger.stage2.artifact"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "contract_version": {
+      "const": "stage2.3/v2"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "connection_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "journal_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "artifact_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "final_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "enum": [
+        "DAILY",
+        "UNDATED"
+      ]
+    },
+    "utc_day": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "state": {
+      "enum": [
+        "OPEN",
+        "CLOSED_COMPLETE",
+        "CLOSED_PARTIAL",
+        "UNVERIFIED"
+      ]
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "synced_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "synced_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "first_rawx_utc": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_rawx_utc": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_start": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_end": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "partial_day": {
+      "const": true
+    },
+    "close_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "contract_version",
+    "run_id",
+    "attempt_id",
+    "connection_id",
+    "journal_id",
+    "artifact_id",
+    "path",
+    "final_path",
+    "kind",
+    "utc_day",
+    "generation",
+    "state",
+    "bytes",
+    "synced_bytes",
+    "sha256",
+    "synced_sha256",
+    "error",
+    "first_rawx_utc",
+    "last_rawx_utc",
+    "source_start",
+    "source_end",
+    "partial_day",
+    "close_reason"
+  ],
+  "additionalProperties": false
+}

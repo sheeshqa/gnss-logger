@@ -1,4 +1,4 @@
-"""Stage 2.2: one reader thread, bounded ingress, exact primary byte journal."""
+"""One reader, bounded primary ingress; opt-in Stage 2.3 daily projection."""
 from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
@@ -24,7 +24,8 @@ def utc_now():
 class RecordController:
     def __init__(self, reader_factory=make_reader, journal_factory=PrimaryJournal,
                  metadata_factory=Metadata, clock=time.monotonic, utc_clock=utc_now,
-                 queue_bytes=8*1024*1024, sync_interval=1.0, identity_timeout=5.0):
+                 queue_bytes=8*1024*1024, sync_interval=1.0, identity_timeout=5.0,
+                 projection_factory=None):
         if type(queue_bytes) is not int or queue_bytes <= 0:
             raise ValueError('queue_bytes must be a positive integer')
         import math
@@ -52,6 +53,7 @@ class RecordController:
         self.artifacts = []
         self.sequence = self.checkpoints = self.framed = 0
         self.storage_failed = self.matched = self.simulated = False
+        self.primary_write_failed = False
         self.identity_timed_out = False
         self.identity_started_clock = None
         self.unarchived = 0
@@ -60,6 +62,8 @@ class RecordController:
         self.last_rawx_utc=self.last_sfrbx_utc=None
         self.last_rawx_clock=self.last_sfrbx_clock=None
         self.d = None
+        self.projection = None
+        self.projection_factory = projection_factory
 
     def request_stop(self, reason):
         with self.lock:
@@ -68,6 +72,9 @@ class RecordController:
         self.stop.set()
 
     def _base(self, kind):
+        if getattr(getattr(self, 'settings', None), 'daily_root', None) is not None:
+            return dict(schema_id='gnss_logger.stage2.'+kind, schema_version=2,
+                        contract_version='stage2.3/v2',run_id=self.run_id,attempt_id=self.attempt_id)
         return dict(schema_id='gnss_logger.stage2.'+kind, schema_version=1,
                     contract_version=CONTRACT_VERSION, run_id=self.run_id, attempt_id=self.attempt_id)
 
@@ -172,16 +179,20 @@ class RecordController:
             self.queue.finish()
 
     def _process(self, chunk):
-        if self.storage_failed:
+        if self.storage_failed and (self.settings.daily_root is None or self.primary_write_failed):
             return  # Counted as unarchived after the producer is joined.
         before = self.journal.written
         try:
             self.journal.append(chunk)
         except Exception as error:
             self.storage_failed = True
+            self.primary_write_failed = True
             self._error('primary_write',error,storage=True)
         accepted = self.journal.written-before
         if accepted:
+            if self.projection:
+                self.projection.primary_end = chunk.offset + accepted
+                self._project(lambda: self.projection.receipt(chunk,accepted))
             before_counts=self.d.rawx_count,self.d.sfrbx_count
             frames = self.d.feed(chunk.data[:accepted])
             self.framed += sum(len(payload)+8 for _,_,payload in frames)
@@ -218,8 +229,14 @@ class RecordController:
             self._error('primary_sync',error,storage=True)
             return
         self.last_sync_utc = self.utc_clock()
+        if self.projection:
+            self._project(lambda: self.projection.sync_receipts(self.journal.synced))
+            if self.matched:
+                self._project(self.projection.advance)
+            self._project(self.projection.checkpoint)
         checkpoint = dict(self._base('checkpoint'),journal_id=self.journal_id,utc=self.last_sync_utc,
             **prefix,time_binding=self._time())
+        self._with_projection(checkpoint)
         self.checkpoints += 1
         self._save(f'checkpoints/{self.checkpoints:08d}.json',checkpoint)
         self._emit('CHECKPOINT','primary_synced',dict(journal_id=self.journal_id,synced_offset=self.journal.synced))
@@ -230,8 +247,9 @@ class RecordController:
         except Exception as error:
             self._error('metadata_'+name,error,storage=True)
 
-    @staticmethod
-    def _time():
+    def _time(self):
+        if self.projection:
+            return self.projection.time.binding()
         # Stage 2.2 never assigns a UTC day, even if Diagnostics sees valid RAWX UTC.
         return dict(status='UNDATED',receiver_utc=None,source='NONE',leap_seconds_valid=False,generation=0)
 
@@ -247,6 +265,7 @@ class RecordController:
             versions={k:v for k,v in versions().items() if k in ('gnss_logger','python','platform','dependencies')},connections=self.connections,
             accounting=a,time_binding=self._time(),artifacts=self.artifacts,stop_reason=self.reason if terminal else None,
             exit_code=code,integrity=integrity,extensions={'gnss_logger.recording':self._details()})
+        self._with_projection(result)
         validate_record(result)
         return result
 
@@ -274,8 +293,29 @@ class RecordController:
             queue_bytes=self.queue.bytes,reconnect_attempts=0,gap_events=self.d.gap_events,
             errors=[f"{e['component']}: {e['error_type']}: {e['message']}" for e in self.errors],
             extensions={'gnss_logger.recording':self._details(),'gnss_logger.diagnostics':self.d.report()})
+        self._with_projection(result)
         validate_record(result)
         return result
+
+    def _with_projection(self, record):
+        if self.settings.daily_root is None:
+            return
+        if self.projection:
+            record['projection'] = self.projection.snapshot()
+        else:
+            from .projection import empty_snapshot
+            record['projection'] = empty_snapshot(self.settings.daily_root,
+                self.directory, self.settings.expected_hz)
+
+    def _project(self, action):
+        if self.projection is None or self.projection.failed:
+            return
+        try:
+            return action()
+        except Exception as error:
+            self.projection.failed = True
+            self.projection.event('PROJECTION_ERROR',str(error))
+            self._error('projection',error,storage=True)
 
     def run(self,settings,stop=None):
         """Controller protocol: returns the schema-v1 diagnostic Mapping."""
@@ -287,6 +327,9 @@ class RecordController:
             raise RuntimeError('Controller instances are single-use')
         self.settings,self.start,self.started = settings,self.clock(),self.utc_clock()
         self.d = Diagnostics(settings.expected_hz)
+        if settings.daily_root is not None:
+            from ..device.ubx import UBXParser
+            self.d.parser = UBXParser(max_payload=65535)
         external = stop or threading.Event()
         thread = None
         observed_errors = 0
@@ -312,6 +355,12 @@ class RecordController:
                 self._transition(State.IDENTIFYING)
                 path=self.directory/'primary'/(self.connection_id+'_'+self.journal_id+'.ubx.part')
                 self.journal=self.journal_factory(path)
+                if settings.daily_root is not None:
+                    from .projection import Projection
+                    self.projection=(self.projection_factory or Projection)(self.directory,settings.daily_root,
+                        settings.station,dict(run_id=self.run_id,attempt_id=self.attempt_id,
+                        connection_id=self.connection_id,journal_id=self.journal_id),path,
+                        settings.expected_hz,self._emit)
                 deadline=None if settings.seconds is None else self.start+settings.seconds
                 thread=threading.Thread(target=self._producer,args=(deadline,external),name='gnss-single-reader',daemon=False)
                 thread.start()
@@ -322,6 +371,8 @@ class RecordController:
                         if external.is_set():self.request_stop('stop_requested')
                         chunk=self.queue.take()
                         if chunk is not None:self._process(chunk)
+                        if self.projection and self.matched:
+                            self._project(self.projection.advance)
                         if (not self.matched and not self.identity_timed_out and self.identity_started_clock is not None
                                 and self.clock()-self.identity_started_clock>=self.identity_timeout):
                             self.identity_timed_out=True
@@ -366,6 +417,15 @@ class RecordController:
             if self.storage_failed and self.state in (State.STARTING,State.IDENTIFYING,State.RECORDING,State.DISCONNECTED):
                 self._transition(State.STORAGE_ERROR)
             if self.state!=State.STOPPING:self._transition(State.STOPPING)
+            if self.projection:
+                self._sync()
+                if not self.matched:
+                    self.projection.failed = True
+                try:
+                    self.projection.finish(not self.errors and self.matched and self.reason!='keyboard_interrupt',self.reason)
+                except Exception as error:
+                    self.projection.failed = True
+                    self._error('projection_finalize',error,storage=True)
             if self.journal is not None:
                 complete=not self.errors and self.matched and self.reason!='keyboard_interrupt'
                 closed=self.journal.close(self.reason if complete else 'partial:'+self.reason)

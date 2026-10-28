@@ -68,7 +68,10 @@ def ack(payload):
 
 
 class UBXParser:
-    def __init__(self):
+    def __init__(self, max_payload=16384):
+        if type(max_payload) is not int or not 0 <= max_payload <= 65535:
+            raise ValueError('Invalid UBX framing payload limit')
+        self.max_payload = max_payload
         self.buffer = bytearray()
         self.bad_checksums = 0
         self.discarded_bytes = 0
@@ -98,7 +101,7 @@ class UBXParser:
                 break
             length = int.from_bytes(self.buffer[4:6], "little")
             # Diagnostic subset, not a universal UBX decoder. RAWX <= 8176.
-            if length > 16384:
+            if length > self.max_payload:
                 self.oversize_headers += 1
                 self.discarded_bytes += 1
                 frames.append((bytes(self.buffer[:1]), None))

@@ -23,8 +23,9 @@ def usb_id(text):
 
 def add_commands(sub, positive):
     description = "Stage 2.1 contracts only. NOT IMPLEMENTED: no hardware access or file operations."
-    record = sub.add_parser("record", help="Stage 2.2 primary recording; no rotation/reconnect", description="Stage 2.2 read-only primary byte recording")
+    record = sub.add_parser("record", help="Read-only primary recording with optional UTC daily projection", description="Stage 2.3: primary journal; opt-in daily rotation; no reconnect/recovery")
     record.add_argument("--output", type=Path, required=True)
+    record.add_argument('--daily-root', type=Path, help='Opt-in UTC daily/undated projection; primary stays in --output')
     record.add_argument("--port", required=True, help="Initial port hint, never receiver identity")
     record.add_argument("--model", required=True, choices=("ZED-F9P", "ZED-X20P"))
     record.add_argument("--vid", type=usb_id, required=True)
@@ -57,7 +58,7 @@ def preview(args, parser):
         try:
             settings = RecordSettings(args.output, args.port,
                 DeviceBinding(args.model, args.vid, args.pid, args.usb_serial, args.usb_location),
-                args.seconds, args.baud, args.expected_hz, args.station, args.retention_policy)
+                args.seconds, args.baud, args.expected_hz, args.station, args.retention_policy, args.daily_root)
         except ValueError as error:
             parser.error(str(error))
         if args.queue_bytes<=0:

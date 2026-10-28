@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gnss-logger:stage2:checkpoint:2",
+  "type": "object",
+  "properties": {
+    "schema_id": {
+      "const": "gnss_logger.stage2.checkpoint"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "contract_version": {
+      "const": "stage2.3/v2"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "journal_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "utc": {
+      "type": "string",
+      "format": "utc"
+    },
+    "synced_offset": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_chunk_sequence": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "prefix_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "time_binding": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "UNDATED",
+            "VALID",
+            "DISCONTINUITY"
+          ]
+        },
+        "receiver_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "utc"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": [
+            "NONE",
+            "RAWX"
+          ]
+        },
+        "leap_seconds_valid": {
+          "type": "boolean"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "status",
+        "receiver_utc",
+        "source",
+        "leap_seconds_valid",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "projection": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eligible_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "projected_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "opaque_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tail_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "backlog_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "receipt_frontier": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "receipt_index": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "range_index": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifact_directory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "closed_artifacts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verified_artifacts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verification_pending": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "finished": {
+          "type": "boolean"
+        },
+        "time_state": {
+          "enum": [
+            "UNDATED",
+            "CANDIDATE",
+            "VALID",
+            "DISCONTINUITY"
+          ]
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_policy": {
+          "type": "object",
+          "properties": {
+            "period_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "ttl_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "tolerance_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "anchors": {
+              "const": 2
+            }
+          },
+          "required": [
+            "period_s",
+            "ttl_s",
+            "tolerance_s",
+            "anchors"
+          ],
+          "additionalProperties": false
+        },
+        "time_checkpoint": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": true
+        },
+        "active": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "root",
+        "cursor",
+        "eligible_bytes",
+        "projected_bytes",
+        "opaque_bytes",
+        "tail_bytes",
+        "pending_bytes",
+        "backlog_bytes",
+        "receipt_frontier",
+        "receipt_index",
+        "range_index",
+        "artifact_directory",
+        "closed_artifacts",
+        "verified_artifacts",
+        "verification_pending",
+        "failed",
+        "finished",
+        "time_state",
+        "generation",
+        "time_policy",
+        "time_checkpoint",
+        "active"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "contract_version",
+    "run_id",
+    "attempt_id",
+    "journal_id",
+    "utc",
+    "synced_offset",
+    "last_chunk_sequence",
+    "prefix_sha256",
+    "time_binding",
+    "projection"
+  ],
+  "additionalProperties": false
+}

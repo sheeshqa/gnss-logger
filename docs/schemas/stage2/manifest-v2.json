@@ -1,0 +1,815 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gnss-logger:stage2:manifest:2",
+  "type": "object",
+  "properties": {
+    "schema_id": {
+      "const": "gnss_logger.stage2.manifest"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "contract_version": {
+      "const": "stage2.3/v2"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "attempt_id": {
+      "type": "string",
+      "format": "uuid-hex"
+    },
+    "state": {
+      "enum": [
+        "STARTING",
+        "IDENTIFYING",
+        "RECORDING",
+        "DISCONNECTED",
+        "WAITING",
+        "STORAGE_ERROR",
+        "STOPPING",
+        "STOPPED"
+      ]
+    },
+    "started_utc": {
+      "type": "string",
+      "format": "utc"
+    },
+    "ended_utc": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "utc"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "elapsed_monotonic_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "clock_discontinuities": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "read_only": {
+      "const": true
+    },
+    "automatic_delete": {
+      "const": false
+    },
+    "retention_policy": {
+      "enum": [
+        "keep_all"
+      ]
+    },
+    "hardware_validation": {
+      "enum": [
+        "NOT TESTED"
+      ]
+    },
+    "binding": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "enum": [
+            "ZED-F9P",
+            "ZED-X20P"
+          ]
+        },
+        "vid": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "usb_serial": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usb_location": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "model",
+        "vid",
+        "pid",
+        "usb_serial",
+        "usb_location"
+      ],
+      "additionalProperties": false
+    },
+    "accounting": {
+      "type": "object",
+      "properties": {
+        "received": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "journal_written": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "journal_synced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unarchived": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "framed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "opaque": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unclassified": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "received_count_exact": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "received",
+        "journal_written",
+        "journal_synced",
+        "pending",
+        "unarchived",
+        "framed",
+        "opaque",
+        "unclassified",
+        "received_count_exact"
+      ],
+      "additionalProperties": false
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "seconds": {
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "until_stopped": {
+          "type": "boolean"
+        },
+        "baud": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expected_hz": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "station": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "seconds",
+        "until_stopped",
+        "baud",
+        "expected_hz",
+        "station"
+      ],
+      "additionalProperties": false
+    },
+    "output_directory": {
+      "type": "string",
+      "format": "absolute-path"
+    },
+    "versions": {
+      "type": "object",
+      "properties": {
+        "gnss_logger": {
+          "type": "string",
+          "minLength": 1
+        },
+        "python": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dependencies": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "gnss_logger",
+        "python",
+        "platform",
+        "dependencies"
+      ],
+      "additionalProperties": false
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "format": "uuid-hex"
+          },
+          "port": {
+            "type": "string",
+            "minLength": 1
+          },
+          "opened_utc": {
+            "type": "string",
+            "format": "utc"
+          },
+          "closed_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "utc"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity_status": {
+            "enum": [
+              "UNIDENTIFIED",
+              "MATCHED",
+              "REJECTED"
+            ]
+          },
+          "match_strength": {
+            "enum": [
+              "NONE",
+              "USB_SERIAL",
+              "USB_TOPOLOGY"
+            ]
+          },
+          "observed_model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "firmware": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vid": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pid": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usb_serial": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usb_location": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "connection_id",
+          "port",
+          "opened_utc",
+          "closed_utc",
+          "identity_status",
+          "match_strength",
+          "observed_model",
+          "firmware",
+          "protocol",
+          "vid",
+          "pid",
+          "usb_serial",
+          "usb_location"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "time_binding": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "UNDATED",
+            "VALID",
+            "DISCONTINUITY"
+          ]
+        },
+        "receiver_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "utc"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": [
+            "NONE",
+            "RAWX"
+          ]
+        },
+        "leap_seconds_valid": {
+          "type": "boolean"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "status",
+        "receiver_utc",
+        "source",
+        "leap_seconds_valid",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid-hex"
+          },
+          "connection_id": {
+            "type": "string",
+            "format": "uuid-hex"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "PRIMARY",
+              "DAILY",
+              "UNDATED"
+            ]
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "CLOSED_COMPLETE",
+              "CLOSED_PARTIAL",
+              "RECOVERED",
+              "UNVERIFIED"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "utc_day": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_ranges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "journal_id": {
+                  "type": "string",
+                  "format": "uuid-hex"
+                },
+                "start": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "journal_id",
+                "start",
+                "end"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "artifact_id",
+          "connection_id",
+          "path",
+          "kind",
+          "state",
+          "bytes",
+          "sha256",
+          "utc_day",
+          "source_ranges"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "stop_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "exit_code": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            130
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "integrity": {
+      "enum": [
+        "NOT_VERIFIED",
+        "VERIFIED",
+        "MISMATCH",
+        "INDETERMINATE"
+      ]
+    },
+    "extensions": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": true
+    },
+    "projection": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eligible_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "projected_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "opaque_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tail_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "backlog_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "receipt_frontier": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "receipt_index": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "range_index": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "bytes",
+                "sha256"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifact_directory": {
+          "type": "string",
+          "minLength": 1
+        },
+        "closed_artifacts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verified_artifacts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "verification_pending": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "boolean"
+        },
+        "finished": {
+          "type": "boolean"
+        },
+        "time_state": {
+          "enum": [
+            "UNDATED",
+            "CANDIDATE",
+            "VALID",
+            "DISCONTINUITY"
+          ]
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "time_policy": {
+          "type": "object",
+          "properties": {
+            "period_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "ttl_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "tolerance_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "anchors": {
+              "const": 2
+            }
+          },
+          "required": [
+            "period_s",
+            "ttl_s",
+            "tolerance_s",
+            "anchors"
+          ],
+          "additionalProperties": false
+        },
+        "time_checkpoint": {
+          "type": "object",
+          "properties": {},
+          "required": [],
+          "additionalProperties": true
+        },
+        "active": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {},
+              "required": [],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "root",
+        "cursor",
+        "eligible_bytes",
+        "projected_bytes",
+        "opaque_bytes",
+        "tail_bytes",
+        "pending_bytes",
+        "backlog_bytes",
+        "receipt_frontier",
+        "receipt_index",
+        "range_index",
+        "artifact_directory",
+        "closed_artifacts",
+        "verified_artifacts",
+        "verification_pending",
+        "failed",
+        "finished",
+        "time_state",
+        "generation",
+        "time_policy",
+        "time_checkpoint",
+        "active"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_id",
+    "schema_version",
+    "contract_version",
+    "run_id",
+    "attempt_id",
+    "state",
+    "started_utc",
+    "ended_utc",
+    "elapsed_monotonic_ns",
+    "clock_discontinuities",
+    "read_only",
+    "automatic_delete",
+    "retention_policy",
+    "hardware_validation",
+    "binding",
+    "accounting",
+    "parameters",
+    "output_directory",
+    "versions",
+    "connections",
+    "time_binding",
+    "artifacts",
+    "stop_reason",
+    "exit_code",
+    "integrity",
+    "extensions",
+    "projection"
+  ],
+  "additionalProperties": false
+}

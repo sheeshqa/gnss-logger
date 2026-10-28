@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gnss-logger"
-version = "0.4.0.dev2"
-description = "Read-only u-blox GNSS diagnostics and Stage 2 recording contracts"
+version = "0.4.0.dev3"
+description = "Read-only u-blox GNSS recording with UTC daily UBX projection"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = ["pyserial==3.5"]

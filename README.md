@@ -1,17 +1,29 @@
-# GNSS Logger 0.4.0.dev2 — первичная регистрация Stage 2.2
+# GNSS Logger 0.4.0.dev3 — UTC-ротация Stage 2.3
 
 Read-only CLI для ZED-F9P / ZED-X20P: Serial, Replay и Mock. GUI отсутствует.
 **Stage 1 0.3.0 принят пользователем после аппаратного ретеста PASS WITH LIMITATIONS.**
 Новый `record` реализует таймер/непрерывный режим, один COM reader, ограниченную очередь,
 первичный журнал всех возвращённых байтов и финализацию с SHA-256/учётом/manifest.
 По умолчанию очередь 8 МиБ, sync 1 с. Нужны явные USB binding и модель; посылается только MON-VER.
-`status`, `verify`, `recover` остаются **4 / NOT_IMPLEMENTED**. UTC-ротации/reconnect/recovery пока нет.
-Версия 0.4.0.dev2 аппаратно **NOT TESTED**. Сообщённый пользователем smoke на Win10/Python 3.15.1
-относится к прежнему `serial` 0.4.0.dev1, а не к новому record.
+`status`, `verify`, `recover` остаются **4 / NOT_IMPLEMENTED**. Reconnect/recovery пока нет.
+Опция `record --daily-root <DATA_ROOT>` включает суточную проекцию из primary journal:
+`<DATA_ROOT>/UBX1/YYYY/MM/UBX1_YYYYMMDD[_001].ubx`; неизвестное время — `UBX1/undated/`.
+`--output` по-прежнему задаёт служебные runs. Корни должны быть раздельными.
+Без `--daily-root` сохраняется прежний режим Stage 2.2 и схемы v1; с опцией — v2.
+Все исходные bytes остаются в primary; daily содержат целые checksum-valid сообщения.
+Повторные запуски резервируют новые имена и не дописывают старые `.ubx`/`.part`.
+Stage 2.2 принят по аппаратным diagnostic как PASS WITH LIMITATIONS; независимая проверка
+его исходных UBX/служебных файлов остаётся открытой. Версия 0.4.0.dev3 аппаратно **NOT TESTED**.
 Существующие команды Stage 1 работают как прежде.
 Описание контрактов: [stage2_1_contracts.md](docs/stage2_1_contracts.md).
 Отчёт подэтапа: [stage2_1_report.md](docs/stage2_1_report.md).
 Stage 2.2: [отчёт](docs/stage2_2_report.md), [обновление и аппаратный тест](docs/stage2_2_hardware_test.md).
+Stage 2.3: [реализация и ограничения](docs/stage2_3_report.md),
+[команды аппаратной проверки Windows 10](docs/stage2_3_hardware_test.md).
+Офлайн-проверка завершённого daily-запуска (не одноимённая зарезервированная CLI-команда):
+`python tools/check_stage2_3_record.py verify <ATTEMPT_DIRECTORY>`.
+Офлайн Replay суточной проекции с явно синтетической шкалой получения:
+`python tools/check_stage2_3_record.py replay <SOURCE.ubx> --output <NEW_DIRECTORY>`.
 Автономный запуск реального CLI record с явно синтетическим источником без COM:
 `python tools/check_stage2_2_record.py --output <NEW_SIMULATED_DIRECTORY>`.
 Результаты старой версии и сообщение пользователя о RINEX/TEC сохранены отдельно.
