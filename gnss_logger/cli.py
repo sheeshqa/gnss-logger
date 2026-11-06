@@ -85,6 +85,8 @@ def parser():
         command.add_argument("--station", default="UBX1")
     from .recording.cli import add_commands
     add_commands(sub, positive)
+    from .conversion.cli import add_command
+    add_command(sub)
     return p
 
 
@@ -118,6 +120,9 @@ def main(argv=None):
     actual_argv = list(sys.argv[1:] if argv is None else argv)
     p = parser()
     args = p.parse_args(actual_argv)
+    if args.command == "convert":
+        from .conversion.cli import run
+        return run(args)
     from .recording.cli import COMMANDS, preview
     if args.command in COMMANDS:
         return preview(args, p)

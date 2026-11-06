@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gnss-logger"
-version = "0.4.0.dev3"
-description = "Read-only u-blox GNSS recording with UTC daily UBX projection"
+version = "0.5.0.dev1"
+description = "Read-only u-blox GNSS recording and standalone UBX to RINEX conversion"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["pyserial==3.5"]
+dependencies = ["pyserial==3.5", "tomli>=2; python_version < '3.11'"]
 
 [project.scripts]
 gnss-logger = "gnss_logger.cli:main"

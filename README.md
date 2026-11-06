@@ -1,4 +1,15 @@
-# GNSS Logger 0.4.0.dev3 — UTC-ротация Stage 2.3
+# GNSS Logger 0.5.0.dev1
+
+Stage 3.1 добавляет отдельную команду `convert` для RINEX 3.02 OBS/NAV. Укажите
+путь к установленному `convbin.exe` в копии `config/conversion.template.toml`.
+
+```powershell
+python -m gnss_logger convert --config .\conversion.local.toml --input 'D:\GNSS data\UBX1.ubx' --dry-run
+```
+
+Без `--input` или `--run-id` команда выбирает последний успешный run по manifest.
+Настройка, проверка файлов и ограничения описаны в [контрактах Stage 3.1](docs/stage3_1_contracts.md).
+Результаты проверок приведены в [отчёте Stage 3.1](docs/stage3_1_test_report.md).
 
 Read-only CLI для ZED-F9P / ZED-X20P: Serial, Replay и Mock. GUI отсутствует.
 **Stage 1 0.3.0 принят пользователем после аппаратного ретеста PASS WITH LIMITATIONS.**

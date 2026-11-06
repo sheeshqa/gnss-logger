@@ -1,0 +1,24 @@
+# Copy to %LOCALAPPDATA%/GNSS/conversion.local.toml or use --config.
+[engine]
+executable = 'C:\Tools\RTKLIB\bin\convbin.exe'
+input_format = "ubx"
+# receiver_model = "ZED-F9P"
+timeout_s = 1800
+
+[input]
+runs_root = "%LOCALAPPDATA%/GNSS/internal/runs"
+daily_root = "%LOCALAPPDATA%/GNSS/data"
+interval_s = 1
+
+[output]
+root = "%LOCALAPPDATA%/GNSS/data/rinex"
+obs = true
+nav = true
+
+[rinex]
+version = "3.02"
+systems = ["G", "R", "E", "C"]
+observations = ["C", "L", "D", "S"]
+signal_groups = ["L1", "L2/E5b", "L5/E5a", "L6"]
+# Optional exact RTKLIB masks. Combined codes must be included explicitly here.
+# signal_masks = ["GL1C", "GL2X", "RL1C", "EL1X", "CL2I"]

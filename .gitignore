@@ -82,6 +82,8 @@ test_interrupt*.json
 # Configuration: publish only explicitly generic templates
 /config/*
 !/config/*.template.json
+!/config/conversion.template.toml
+/RTKLIB-main/
 *.local.json
 *.local.toml
 *.local.ini
