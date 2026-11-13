@@ -26,6 +26,8 @@ def add_commands(sub, positive):
     record = sub.add_parser("record", help="Read-only primary recording with optional UTC daily projection", description="Stage 2.3: primary journal; opt-in daily rotation; no reconnect/recovery")
     record.add_argument("--output", type=Path, required=True)
     record.add_argument('--daily-root', type=Path, help='Opt-in UTC daily/undated projection; primary stays in --output')
+    record.add_argument('--convert-config', type=Path,
+                        help='Convert verified closed daily segments in the background using this TOML')
     record.add_argument("--port", required=True, help="Initial port hint, never receiver identity")
     record.add_argument("--model", required=True, choices=("ZED-F9P", "ZED-X20P"))
     record.add_argument("--vid", type=usb_id, required=True)
@@ -66,7 +68,29 @@ def preview(args, parser):
         from .controller import RecordController, run_with_signals
         controller=RecordController(queue_bytes=args.queue_bytes,sync_interval=args.sync_interval,
                                     identity_timeout=args.identity_timeout)
-        code,report=run_with_signals(controller,settings)
+        if args.convert_config is not None and settings.daily_root is None:
+            parser.error('--convert-config requires --daily-root')
+        if args.convert_config is None:
+            code,report=run_with_signals(controller,settings)
+        else:
+            from ..conversion.worker import SegmentWorker
+            worker = SegmentWorker(args.convert_config, receiver_model=args.model)
+            controller.on_segment = worker.submit
+            try:
+                code,report=run_with_signals(controller,settings)
+            finally:
+                conversion = worker.finish()
+            # The recording manifest/report describe recording integrity independently.
+            report['extensions']['gnss_logger.conversion'] = conversion
+            if controller.directory is not None:
+                from ..session import write_new_json
+                summary = controller.directory/'conversion-summary.json'
+                try:
+                    write_new_json(summary,conversion)
+                except OSError as error:
+                    conversion['summary_error'] = str(error)
+                else:
+                    conversion['summary_path'] = str(summary.resolve())
         print(json.dumps(report,ensure_ascii=False,allow_nan=False,indent=2))
         return code
     else:

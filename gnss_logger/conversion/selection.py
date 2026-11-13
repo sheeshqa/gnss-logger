@@ -49,7 +49,7 @@ def select(settings, input_path=None, run_id=None):
                        key=lambda p:p.name.casefold())
         if not files:
             raise ValueError('Directory contains no completed .ubx files')
-        return [file_source(p) for p in files]
+        return [Source(p.absolute()) for p in files]
     if run_id and not re.fullmatch(r'[a-f0-9]{32}',run_id):
         raise ValueError('run_id must be a lowercase UUID hex string')
     pattern = (run_id or '*')+'/attempts/*/manifest.json'
@@ -94,6 +94,6 @@ def select(settings, input_path=None, run_id=None):
     if not rows:
         raise ValueError('No completed UBX artifacts in selected manifest')
     models = {c['connection_id']:c['observed_model'] for c in manifest['connections']}
-    return [file_source(checked_path(row['path'],root),**owners,artifact_id=row['artifact_id'],
+    return [Source(checked_path(row['path'],root),**owners,artifact_id=row['artifact_id'],
                         sha256=row['sha256'],size=row['bytes'],utc_day=row['utc_day'],
                         receiver_model=models.get(row['connection_id'])) for row in rows]

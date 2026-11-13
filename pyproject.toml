@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gnss-logger"
-version = "0.5.0.dev1"
+version = "0.5.0.dev2"
 description = "Read-only u-blox GNSS recording and standalone UBX to RINEX conversion"
 readme = "README.md"
 requires-python = ">=3.9"

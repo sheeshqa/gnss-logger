@@ -18,6 +18,7 @@ class Projection:
         self.writer_factory, self.verifier_factory = writer_factory, verifier_factory
         self.artifact_directory = directory/'artifacts'
         self.artifact_directory.mkdir()
+        self.on_segment = None
         self.receipts = IndexWriter(directory/'receipts.jsonl')
         self.ranges = self.reader = self.receipt_reader = self.verifier = None
         try:
@@ -107,6 +108,8 @@ class Projection:
                     pass
                 if first_error is None:
                     first_error = error
+            elif task['state']=='CLOSED_COMPLETE' and self.on_segment is not None:
+                self.on_segment(dict(task))
             if not wait:
                 continue
         if first_error:

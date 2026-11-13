@@ -1,0 +1,58 @@
+"""Optional sequential conversion of committed recording artifacts."""
+from argparse import Namespace
+from collections import Counter
+from pathlib import Path
+from queue import Empty, Full, Queue
+from threading import Event, Thread
+
+from .cli import execute
+from .selection import Source
+
+
+class SegmentWorker:
+    def __init__(self, config, receiver_model=None, capacity=32):
+        self.args = Namespace(config=config, output=None, dry_run=False)
+        self.receiver_model = receiver_model
+        self.queue = Queue(maxsize=capacity)
+        self.closed = Event()
+        self.counts = Counter()
+        self.deferred = 0
+        self.last_report = None
+        self.last_error = None
+        self.thread = Thread(target=self._run, name='gnss-convbin')
+        self.thread.start()
+
+    def submit(self, artifact):
+        source = Source(Path(artifact['path']), run_id=artifact['run_id'],
+                        attempt_id=artifact['attempt_id'], artifact_id=artifact['artifact_id'],
+                        size=artifact['bytes'], sha256=artifact['sha256'],
+                        utc_day=artifact['utc_day'], receiver_model=self.receiver_model)
+        try:
+            self.queue.put_nowait(source)
+        except Full:
+            self.deferred += 1
+
+    def _run(self):
+        while True:
+            try:
+                source = self.queue.get(timeout=0.25)
+            except Empty:
+                if self.closed.is_set():
+                    return
+                continue
+            try:
+                report = execute(self.args, sources=[source])
+                self.counts[report['status']] += 1
+                self.last_report = report.get('report_path')
+                errors = report['errors'] + report['segments'][0]['errors'] if report['segments'] else report['errors']
+                if errors:
+                    self.last_error = errors[-1]
+            except Exception as error:
+                self.counts['FAILED'] += 1
+                self.last_error = str(error)
+
+    def finish(self):
+        self.closed.set()
+        self.thread.join()
+        return dict(statuses=dict(self.counts), deferred=self.deferred,
+                    last_report=self.last_report, last_error=self.last_error)

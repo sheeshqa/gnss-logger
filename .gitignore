@@ -84,6 +84,9 @@ test_interrupt*.json
 !/config/*.template.json
 !/config/conversion.template.toml
 /RTKLIB-main/
+conversion-*.json
+*.conversion.json
+.convbin-*/
 *.local.json
 *.local.toml
 *.local.ini

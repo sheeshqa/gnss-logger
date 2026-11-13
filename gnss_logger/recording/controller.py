@@ -63,6 +63,7 @@ class RecordController:
         self.last_rawx_clock=self.last_sfrbx_clock=None
         self.d = None
         self.projection = None
+        self.on_segment = None
         self.projection_factory = projection_factory
 
     def request_stop(self, reason):
@@ -361,6 +362,7 @@ class RecordController:
                         settings.station,dict(run_id=self.run_id,attempt_id=self.attempt_id,
                         connection_id=self.connection_id,journal_id=self.journal_id),path,
                         settings.expected_hz,self._emit)
+                    self.projection.on_segment = self.on_segment
                 deadline=None if settings.seconds is None else self.start+settings.seconds
                 thread=threading.Thread(target=self._producer,args=(deadline,external),name='gnss-single-reader',daemon=False)
                 thread.start()

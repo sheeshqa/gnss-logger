@@ -181,11 +181,107 @@ class ConversionTests(TestCase):
         self.output.mkdir()
         collision=self.output/'segment one.obs'
         collision.write_bytes(b'existing observation')
-        self.assertEqual(self.run_cli()['status'],'FAILED')
+        self.assertEqual(self.run_cli()['status'],'CONFLICT')
         self.assertEqual(collision.read_bytes(),b'existing observation')
         self.assertFalse(list(self.output.glob('*.nav')))
         result=self.run_cli('--output',str(self.root/'new output'))
         self.assertIn(result['status'],('SUCCESS','SUCCESS_WITH_WARNINGS'))
+
+    def test_eight_segments_repeat_and_detect_tampering(self):
+        inputs = self.root/'batch'
+        inputs.mkdir()
+        for index in range(8):
+            (inputs/f'segment{index}.ubx').write_bytes(self.original)
+        args = ('--input',str(inputs))
+        first = self.run_cli(*args,explicit=False)
+        self.assertEqual(first['summary'],{'SUCCESS_WITH_WARNINGS':8})
+        self.calls.clear()
+        second = self.run_cli(*args,explicit=False)
+        self.assertEqual(second['summary'],{'ALREADY_CONVERTED':8})
+        self.assertTrue(all(len(args)<=2 for args in self.calls))
+        (self.output/'segment0.nav').write_bytes(b'foreign NAV')
+        third = self.run_cli(*args,explicit=False)
+        self.assertEqual(third['summary'],{'CONFLICT':1,'ALREADY_CONVERTED':7})
+        self.assertEqual((self.output/'segment0.nav').read_bytes(),b'foreign NAV')
+
+    def test_legacy_report_proves_existing_pair(self):
+        first = self.run_cli()
+        segment = first['segments'][0]
+        Path(segment['result_path']).unlink()
+        first['schema_version'] = 1
+        Path(first['report_path']).write_text(json.dumps(first),encoding='utf-8')
+        second = self.run_cli()
+        self.assertEqual(second['summary'],{'ALREADY_CONVERTED':1})
+        self.assertEqual(second['segments'][0]['result_path'],first['report_path'])
+
+    def test_corrupt_and_empty_input_do_not_block_next_segment(self):
+        inputs = self.root/'batch'
+        inputs.mkdir()
+        (inputs/'a.ubx').write_bytes(self.original+b'noise')
+        (inputs/'b.ubx').touch()
+        (inputs/'c.ubx').write_bytes(self.original)
+        result = self.run_cli('--input',str(inputs),explicit=False)
+        self.assertEqual(result['summary'],{'FAILED':2,'SUCCESS_WITH_WARNINGS':1})
+        self.assertEqual(list(self.output.glob('*.obs')),[self.output/'c.obs'])
+
+    def test_receipt_disk_full_rolls_back_outputs(self):
+        import errno
+        from gnss_logger.conversion.results import publish_exclusive
+        def disk_full(source,target):
+            if source.name=='result.json':
+                raise OSError(errno.ENOSPC,'disk full')
+            publish_exclusive(source,target)
+        with patch('gnss_logger.conversion.results.publish_exclusive',disk_full):
+            result = self.run_cli()
+        self.assertEqual(result['summary'],{'FAILED':1})
+        self.assertFalse(list(self.output.glob('*.obs')))
+        self.assertFalse(list(self.output.glob('*.nav')))
+        self.assertFalse(list(self.output.glob('*.conversion.json')))
+
+    def test_missing_receipt_after_interruption_is_conflict(self):
+        first = self.run_cli()
+        Path(first['segments'][0]['result_path']).unlink()
+        result = self.run_cli()
+        self.assertEqual(result['summary'],{'CONFLICT':1})
+        self.assertFalse(result['segments'][0]['published_outputs'])
+
+    def record_with_worker(self):
+        from test_stage2_record import Clock, ScriptReader
+        from gnss_logger.recording.controller import RecordController
+        clock=Clock()
+        steps=stage23.ProjectionTests.midnight(self)
+        def controller(**options):
+            return RecordController(reader_factory=lambda settings,conn:ScriptReader(conn,steps,clock),
+                                    clock=clock,**options)
+        args=['record','--output',str(self.root/'internal/runs'),'--daily-root',str(self.root/'data'),
+              '--port','COM_TEST','--model','ZED-F9P','--vid','0x1546','--pid','0x01a9',
+              '--usb-location','1-9','--seconds','100','--convert-config',str(self.config)]
+        with patch('gnss_logger.recording.controller.RecordController',side_effect=controller), \
+                patch('gnss_logger.conversion.engine.subprocess.run',self.subprocess_fixture), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(args),0)
+        report=json.loads(output.getvalue())
+        return report['extensions']['gnss_logger.conversion']
+
+    def test_record_dispatches_only_committed_segments_to_worker(self):
+        self.exe.unlink()
+        conversion=self.record_with_worker()
+        self.assertEqual(conversion['statuses'],{'FAILED':3})
+        self.assertEqual(json.loads(Path(conversion['summary_path']).read_text(encoding='utf-8'))['statuses'],
+                         {'FAILED':3})
+        for path in self.output.glob('conversion-*.json'):
+            result=json.loads(path.read_text(encoding='utf-8'))
+            self.assertEqual(result['summary'],{'NOT_RUN':1})
+            self.assertTrue(Path(result['segments'][0]['source']['path']).is_file())
+            self.assertTrue(result['segments'][0]['source']['artifact_id'])
+
+    def test_record_worker_publishes_outputs_and_batch_can_reuse_them(self):
+        conversion=self.record_with_worker()
+        # Initial undated MON-VER segment has no observations.
+        self.assertEqual(conversion['statuses'],{'FAILED':1,'SUCCESS_WITH_WARNINGS':2})
+        self.assertEqual(len(list(self.output.glob('*.conversion.json'))),2)
+        repeated=self.run_cli(explicit=False)
+        self.assertEqual(repeated['summary'],{'FAILED':1,'ALREADY_CONVERTED':2})
 
     def test_nonzero_process_and_interruption_leave_no_outputs(self):
         self.returncode=4
@@ -242,7 +338,7 @@ class ConversionTests(TestCase):
         collision=self.output/'segment one.nav'
         self.side_effect=lambda: collision.write_bytes(b'existing nav from concurrent conversion')
         report=self.run_cli()
-        self.assertEqual(report['status'],'FAILED')
+        self.assertEqual(report['status'],'CONFLICT')
         self.assertFalse((self.output/'segment one.obs').exists())
         self.assertEqual(collision.read_bytes(),b'existing nav from concurrent conversion')
 

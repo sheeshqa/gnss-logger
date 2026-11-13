@@ -12,10 +12,10 @@ import uuid
 
 from ..capture.framing import Framer
 from ..device.ubx import rawx, sfrbx
-from ..recording.storage import publish_exclusive
 from ..session import file_fingerprint
 from .config import COMBINED, GNSS, GROUPS, MASKS, SIGNALS
 from .rinex import observations, navigation
+from .results import commit, existing, identity, legacy
 
 def invoke(args, cwd, timeout):
     # convbin can write progress for every epoch. Limit the size retained in JSON.
@@ -145,14 +145,33 @@ def convert(settings, source, report, dry_run, engine):
     work=Path(report['cwd'])
     outputs={key:Path(value) for key,value in report['outputs'].items()}
     report['status']='FAILED'
-    for path in outputs.values():
-        if os.path.lexists(path):
-            raise FileExistsError('Existing RINEX output: '+str(path))
-    if dry_run:
+    if source.path.suffix.lower()!='.ubx' or source.path.is_symlink() or not source.path.is_file():
+        raise ValueError('Expected a completed regular .ubx file: '+str(source.path))
+    receipt=work.parent/(source.path.stem+'.conversion.json')
+    occupied=os.path.lexists(receipt) or any(os.path.lexists(path) for path in outputs.values())
+    if dry_run or occupied:
         fingerprint=file_fingerprint(source.path)
+        if not fingerprint['bytes']:
+            raise ValueError('Empty UBX: '+str(source.path))
         if source.size is not None and fingerprint!=dict(bytes=source.size,sha256=source.sha256):
             raise ValueError('Source differs from completed artifact fingerprint')
         report['source'].update(fingerprint)
+    if occupied:
+        key=identity(settings,report,engine)
+        prior=existing(receipt,key,report['outputs'])
+        result_path=str(receipt)
+        if prior is None and not os.path.lexists(receipt):
+            prior,result_path=legacy(work.parent,key,report['outputs'])
+        if prior is None:
+            report['status']='CONFLICT'
+            report['errors'].append('Existing output without a matching verified conversion result')
+        else:
+            report.update(status='ALREADY_CONVERTED',result_path=result_path,
+                          published_outputs=prior['published_outputs'],
+                          output_fingerprints=prior['output_fingerprints'],
+                          validation=prior['validation'],warnings=prior['warnings'])
+        return
+    if dry_run:
         report['status']='DRY_RUN'
         return
     with tempfile.TemporaryDirectory(prefix=work.name+'-',dir=work.parent) as folder:
@@ -160,6 +179,10 @@ def convert(settings, source, report, dry_run, engine):
         report['cwd']=folder
         fingerprint=snapshot(source,work/'input.ubx')
         report['source'].update(fingerprint)
+        if fingerprint['opaque_bytes'] or fingerprint['tail_bytes'] or fingerprint['decode_errors']:
+            raise ValueError('UBX contains opaque, incomplete or undecodable data')
+        if settings.obs and not fingerprint['rawx_signals']:
+            raise ValueError('UBX has no usable RAWX measurements for OBS')
         if file_fingerprint(settings.executable)!=dict(bytes=engine['bytes'],sha256=engine['sha256']):
             raise ValueError('convbin executable changed after compatibility check')
         report['process']=invoke(report['args'],work,settings.timeout_s)
@@ -229,20 +252,12 @@ def convert(settings, source, report, dry_run, engine):
                 report['errors'].append(str(error))
                 report['status']='INCOMPLETE_NAVIGATION'
                 return
-        if any(fingerprint[k] for k in ('opaque_bytes','tail_bytes','decode_errors')):
-            warnings.append('UBX contains opaque, incomplete or undecodable data')
         report['output_fingerprints']={key:file_fingerprint(work/('output.'+key)) for key in outputs}
-        published=[]
         try:
-            for key,path in outputs.items():
-                publish_exclusive(work/('output.'+key),path)
-                published.append(path)
-        except BaseException:
-            for path in published:
-                path.unlink()
-            raise
-    report['published_outputs']=report['outputs'].copy()
-    report['status']='SUCCESS_WITH_WARNINGS' if report['warnings'] else 'SUCCESS'
+            commit(work,receipt,identity(settings,report,engine),report)
+        except FileExistsError as error:
+            report['status']='CONFLICT'
+            report['errors'].append(str(error))
 
 
 def boundaries(segments, interval):

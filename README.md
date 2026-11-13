@@ -1,4 +1,7 @@
-# GNSS Logger 0.5.0.dev1
+# GNSS Logger 0.5.0.dev2
+
+Stage 3.2 добавляет повторяемую пакетную конвертацию и опцию записи
+`--convert-config` для закрытых сегментов. См. [инструкцию Stage 3.2](docs/stage3_2.md).
 
 Stage 3.1 добавляет отдельную команду `convert` для RINEX 3.02 OBS/NAV. Укажите
 путь к установленному `convbin.exe` в копии `config/conversion.template.toml`.

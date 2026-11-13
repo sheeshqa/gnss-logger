@@ -1,6 +1,7 @@
 """Independent conversion entry point and per-operation JSON reports."""
 from dataclasses import asdict
 import json
+from collections import Counter
 from pathlib import Path
 import subprocess
 import uuid
@@ -11,9 +12,9 @@ from ..recording.storage import publish_exclusive
 from .config import default_root, load
 from .engine import boundaries, convert, probe, stage_report
 from .selection import select
+from .results import SUCCESS
 
 HANDLED = (OSError, ValueError, subprocess.SubprocessError, KeyError, ImportError)
-SUCCESS = {'SUCCESS','SUCCESS_WITH_WARNINGS'}
 
 
 def add_command(sub):
@@ -26,10 +27,10 @@ def add_command(sub):
     command.add_argument('--dry-run',action='store_true',help='Show arguments and destinations without publishing files')
 
 
-def execute(args):
+def execute(args, sources=None):
     operation=uuid.uuid4().hex
     root=(args.output or default_root()/'data/rinex').resolve()
-    report=dict(schema_version=1,schema_id='gnss_logger.conversion',operation_id=operation,
+    report=dict(schema_version=2,schema_id='gnss_logger.conversion',operation_id=operation,
         started_utc=utc_now(),gnss_logger_version=__version__,status='FAILED',dry_run=args.dry_run,
         config_path=str(args.config.resolve() if args.config else default_root()/'conversion.local.toml'),
         converter={},selected_inputs=[],segments=[],errors=[],warnings=[],boundaries=[])
@@ -40,15 +41,17 @@ def execute(args):
         report['settings']={key:str(value) if isinstance(value,Path) else value
                             for key,value in asdict(settings).items()}
         report['settings']['output_root']=str(root)
-        sources=select(settings,args.input,args.run_id)
+        sources=select(settings,args.input,args.run_id) if sources is None else sources
         report['selected_inputs']=[str(source.path) for source in sources]
+        report['segments']=[dict(source={**asdict(source),'path':str(source.path)},
+                                 status='NOT_RUN',validation={},warnings=[],errors=[])
+                            for source in sources]
         probe(settings,report['converter'])
         if not args.dry_run:
             root.mkdir(parents=True,exist_ok=True)
-        for source in sources:
-            segment=stage_report(settings,source,root,report['converter']['options'])
-            report['segments'].append(segment)
+        for source,segment in zip(sources,report['segments']):
             try:
+                segment.update(stage_report(settings,source,root,report['converter']['options']))
                 convert(settings,source,segment,args.dry_run,report['converter'])
             except HANDLED as error:
                 segment['status']='FAILED'
@@ -58,18 +61,21 @@ def execute(args):
                 raise
         report['boundaries']=boundaries(report['segments'],settings.interval_s)
         statuses={segment['status'] for segment in report['segments']}
-        if statuses=={'DRY_RUN'}:
+        if args.dry_run and statuses and statuses<= {'DRY_RUN','ALREADY_CONVERTED'}:
             report['status'],code='DRY_RUN',0
-        elif statuses<=SUCCESS:
-            report['status']='SUCCESS_WITH_WARNINGS' if 'SUCCESS_WITH_WARNINGS' in statuses or report['boundaries'] else 'SUCCESS'
+        elif statuses and statuses<=SUCCESS:
+            report['status']='SUCCESS_WITH_WARNINGS' if any(s['warnings'] for s in report['segments']) or report['boundaries'] else 'SUCCESS'
             code=0
-        elif 'FAILED' not in statuses and 'INCOMPLETE_NAVIGATION' in statuses:
+        elif statuses<=SUCCESS|{'INCOMPLETE_NAVIGATION'} and 'INCOMPLETE_NAVIGATION' in statuses:
             report['status'],code='INCOMPLETE_NAVIGATION',3
+        elif statuses=={'CONFLICT'}:
+            report['status']='CONFLICT'
     except HANDLED as error:
         report['errors'].append(str(error))
     except KeyboardInterrupt:
         report['status'],code='INTERRUPTED',130
-    report.update(ended_utc=utc_now(),exit_code=code)
+    report.update(ended_utc=utc_now(),exit_code=code,
+                  summary=dict(Counter(segment['status'] for segment in report['segments'])))
     if not args.dry_run:
         try:
             root.mkdir(parents=True,exist_ok=True)
