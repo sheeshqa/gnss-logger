@@ -23,13 +23,13 @@ def add_command(sub):
     source.add_argument('--input',type=Path,help='Completed UBX file or directory of UBX files')
     source.add_argument('--run-id',help='Completed recording run UUID')
     command.add_argument('--config',type=Path,help='TOML settings')
-    command.add_argument('--output',type=Path,help='Separate output directory for OBS/NAV and reports')
+    command.add_argument('--output',type=Path,help='Root for unique per-operation OBS/NAV and report directories')
     command.add_argument('--dry-run',action='store_true',help='Show arguments and destinations without publishing files')
 
 
 def execute(args, sources=None):
     operation=uuid.uuid4().hex
-    root=(args.output or default_root()/'data/rinex').resolve()
+    root=(args.output or default_root()/'data/rinex').resolve()/('conversion-'+operation)
     report=dict(schema_version=2,schema_id='gnss_logger.conversion',operation_id=operation,
         started_utc=utc_now(),gnss_logger_version=__version__,status='FAILED',dry_run=args.dry_run,
         config_path=str(args.config.resolve() if args.config else default_root()/'conversion.local.toml'),
@@ -37,7 +37,8 @@ def execute(args, sources=None):
     code=1
     try:
         settings=load(args.config)
-        root=(args.output or settings.output_root).resolve()
+        root=(args.output or settings.output_root).resolve()/('conversion-'+operation)
+        report['output_directory']=str(root)
         report['settings']={key:str(value) if isinstance(value,Path) else value
                             for key,value in asdict(settings).items()}
         report['settings']['output_root']=str(root)
@@ -46,12 +47,18 @@ def execute(args, sources=None):
         report['segments']=[dict(source={**asdict(source),'path':str(source.path)},
                                  status='NOT_RUN',validation={},warnings=[],errors=[])
                             for source in sources]
-        probe(settings,report['converter'])
+        if args.dry_run:
+            probe(settings,report['converter'])
         if not args.dry_run:
             root.mkdir(parents=True,exist_ok=True)
-        for source,segment in zip(sources,report['segments']):
+        for index,(source,segment) in enumerate(zip(sources,report['segments'])):
             try:
-                segment.update(stage_report(settings,source,root,report['converter']['options']))
+                segment_root=root
+                if sum(s.path.stem.casefold()==source.path.stem.casefold() for s in sources)>1:
+                    segment_root=root/('segment-'+str(index+1))
+                    if not args.dry_run:
+                        segment_root.mkdir()
+                segment.update(stage_report(settings,source,segment_root,report['converter'].get('options')))
                 convert(settings,source,segment,args.dry_run,report['converter'])
             except HANDLED as error:
                 segment['status']='FAILED'
@@ -60,8 +67,10 @@ def execute(args, sources=None):
                 segment['status']='INTERRUPTED'
                 raise
         report['boundaries']=boundaries(report['segments'],settings.interval_s)
-        statuses={segment['status'] for segment in report['segments']}
-        if args.dry_run and statuses and statuses<= {'DRY_RUN','ALREADY_CONVERTED'}:
+        statuses={segment['status'] for segment in report['segments']}-{'SKIPPED'}
+        if report['segments'] and not statuses:
+            report['status'],code='SKIPPED',0
+        elif args.dry_run and statuses and statuses<= {'DRY_RUN','ALREADY_CONVERTED'}:
             report['status'],code='DRY_RUN',0
         elif statuses and statuses<=SUCCESS:
             report['status']='SUCCESS_WITH_WARNINGS' if any(s['warnings'] for s in report['segments']) or report['boundaries'] else 'SUCCESS'

@@ -137,7 +137,7 @@ def stage_report(settings, source, root, options):
              if getattr(settings,key)}
     work=root/('.convbin-'+uuid.uuid4().hex)
     return dict(source={**asdict(source),'path':str(source.path)},outputs=outputs,
-                cwd=str(work),args=command(settings,source,options),
+                cwd=str(work),args=command(settings,source,options) if options is not None else [],
                 validation={},published_outputs={},warnings=[],errors=[])
 
 
@@ -181,8 +181,20 @@ def convert(settings, source, report, dry_run, engine):
         report['source'].update(fingerprint)
         if fingerprint['opaque_bytes'] or fingerprint['tail_bytes'] or fingerprint['decode_errors']:
             raise ValueError('UBX contains opaque, incomplete or undecodable data')
+        if not fingerprint['rawx_epochs'] and source.utc_day is None:
+            if file_fingerprint(source.path)!=dict(bytes=fingerprint['bytes'],sha256=fingerprint['sha256']):
+                raise ValueError('Source changed during conversion')
+            report.update(status='SKIPPED',skip_reason='no_rawx_undated_control_only',outputs={})
+            return
         if settings.obs and not fingerprint['rawx_signals']:
             raise ValueError('UBX has no usable RAWX measurements for OBS')
+        if not engine:
+            try:
+                probe(settings,engine)
+            except BaseException:
+                engine.clear()
+                raise
+        report['args']=command(settings,source,engine['options'])
         if file_fingerprint(settings.executable)!=dict(bytes=engine['bytes'],sha256=engine['sha256']):
             raise ValueError('convbin executable changed after compatibility check')
         report['process']=invoke(report['args'],work,settings.timeout_s)
@@ -262,6 +274,7 @@ def convert(settings, source, report, dry_run, engine):
 
 def boundaries(segments, interval):
     results=[]
+    segments=[segment for segment in segments if segment['status']!='SKIPPED']
     for previous,current in zip(segments,segments[1:]):
         a,b=(item['validation'].get('obs') for item in (previous,current))
         if not a or not b or not a['time_system'] or a['time_system']!=b['time_system']:
