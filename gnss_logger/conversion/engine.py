@@ -15,7 +15,7 @@ from ..device.ubx import rawx, sfrbx
 from ..session import file_fingerprint
 from .config import COMBINED, GNSS, GROUPS, MASKS, SIGNALS
 from .rinex import observations, navigation
-from .results import commit, existing, identity, legacy
+from .results import OBS_ONLY, commit, existing, identity, legacy
 
 def invoke(args, cwd, timeout):
     # convbin can write progress for every epoch. Limit the size retained in JSON.
@@ -166,10 +166,14 @@ def convert(settings, source, report, dry_run, engine):
             report['status']='CONFLICT'
             report['errors'].append('Existing output without a matching verified conversion result')
         else:
-            report.update(status='ALREADY_CONVERTED',result_path=result_path,
+            report.update(status=OBS_ONLY if prior['status']==OBS_ONLY else 'ALREADY_CONVERTED',result_path=result_path,
+                          outputs=prior['published_outputs'].copy(),
                           published_outputs=prior['published_outputs'],
                           output_fingerprints=prior['output_fingerprints'],
                           validation=prior['validation'],warnings=prior['warnings'])
+            if prior['status']==OBS_ONLY:
+                report['missing_outputs']=prior['missing_outputs']
+                report['requested_outputs']=prior['requested_outputs']
         return
     if dry_run:
         report['status']='DRY_RUN'
@@ -250,7 +254,20 @@ def convert(settings, source, report, dry_run, engine):
                 warnings.append('Requested observation types absent: '+', '.join(missing_types))
             if obs['gaps'] or obs['nonmonotonic_epochs'] or obs['epochs']!=fingerprint['rawx_epochs']:
                 warnings.append('OBS epoch continuity/count differs from nominal RAWX stream. Original segments preserved.')
-        if settings.nav:
+        missing_nav=False
+        if settings.nav and settings.obs and settings.allow_obs_without_nav:
+            try:
+                (work/'output.nav').stat()
+            except FileNotFoundError:
+                missing_nav=True
+        if missing_nav:
+            report['status']=OBS_ONLY
+            report['requested_outputs']=report['outputs'].copy()
+            report['missing_outputs']=['nav']
+            warnings.append('NAV missing: validated OBS published without navigation; conversion is incomplete')
+            report['outputs'].pop('nav')
+            outputs.pop('nav')
+        elif settings.nav:
             try:
                 nav=checks['nav']=navigation(work/'output.nav')
                 missing=(set(fingerprint['sfrbx_systems']) & set(settings.systems))-set(nav['records'])

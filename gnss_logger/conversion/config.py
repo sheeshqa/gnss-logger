@@ -51,6 +51,7 @@ class Settings:
     receiver_model: str
     timeout_s: float
     interval_s: float
+    allow_obs_without_nav: bool = False
 
 
 def load(path=None):
@@ -66,7 +67,7 @@ def load(path=None):
             data = toml.load(handle)
     keys = dict(engine={'executable','input_format','receiver_model','timeout_s'},
                 input={'runs_root','daily_root','interval_s'},
-                output={'root','obs','nav'},
+                output={'root','obs','nav','allow_obs_without_nav'},
                 rinex={'version','systems','observations','signal_groups','signal_masks'})
     for key, section in data.items():
         if key not in keys or not isinstance(section, dict) or section.keys()-keys[key]:
@@ -109,6 +110,9 @@ def load(path=None):
     obs, nav = output.get('obs',True), output.get('nav',True)
     if type(obs) is not bool or type(nav) is not bool or not (obs or nav):
         raise ValueError('Enable OBS, NAV, or both')
+    allow_obs_without_nav=output.get('allow_obs_without_nav',False)
+    if type(allow_obs_without_nav) is not bool or (allow_obs_without_nav and not (obs and nav)):
+        raise ValueError('allow_obs_without_nav requires OBS and NAV enabled and a boolean value')
     model = engine.get('receiver_model','')
     if not isinstance(model,str) or len(model)>20 or any(ord(c)<32 or ord(c)>126 or c=='/' for c in model):
         raise ValueError('receiver_model must be at most 20 printable ASCII characters without slash')
@@ -116,4 +120,5 @@ def load(path=None):
     return Settings(location(executable),location(source.get('runs_root',base/'internal/runs')),
         location(source.get('daily_root',base/'data')),location(output.get('root',base/'data/rinex')),
         version,systems,observations,groups,masks,obs,nav,model,
-        positive(engine.get('timeout_s',1800),'timeout_s'),positive(source.get('interval_s',1),'interval_s'))
+        positive(engine.get('timeout_s',1800),'timeout_s'),positive(source.get('interval_s',1),'interval_s'),
+        allow_obs_without_nav)

@@ -7,12 +7,16 @@ from ..recording.storage import publish_exclusive
 from ..session import file_fingerprint, write_new_json
 
 SUCCESS = {'SUCCESS', 'SUCCESS_WITH_WARNINGS', 'ALREADY_CONVERTED'}
+OBS_ONLY = 'OBS_ONLY_INCOMPLETE_NAVIGATION'
 
 
 def identity(settings, segment, engine):
-    return dict(source_sha256=segment['source']['sha256'], source_bytes=segment['source']['bytes'],
+    key = dict(source_sha256=segment['source']['sha256'], source_bytes=segment['source']['bytes'],
                 executable_sha256=engine['sha256'], arguments=segment['args'][1:],
                 interval_s=settings.interval_s)
+    if settings.allow_obs_without_nav:
+        key['allow_obs_without_nav']=True
+    return key
 
 
 def existing(receipt, key, outputs):
@@ -20,12 +24,22 @@ def existing(receipt, key, outputs):
         return None
     try:
         value = json.loads(receipt.read_text(encoding='utf-8'))
+        if not isinstance(value,dict):
+            return None
+        expected_outputs=outputs
+        if value.get('status')==OBS_ONLY:
+            if not key.get('allow_obs_without_nav') or 'obs' not in outputs:
+                return None
+            if 'nav' in outputs and os.path.lexists(outputs['nav']):
+                return None
+            expected_outputs={'obs':outputs['obs']}
         if (value['schema_id']!='gnss_logger.conversion.result' or value['schema_version']!=1
-                or value['identity']!=key or value['published_outputs']!=outputs
-                or value['status'] not in {'SUCCESS','SUCCESS_WITH_WARNINGS'}):
+                or value['identity']!=key or value['published_outputs']!=expected_outputs
+                or value['status'] not in {'SUCCESS','SUCCESS_WITH_WARNINGS',OBS_ONLY}
+                or (value['status']==OBS_ONLY and value.get('missing_outputs')!=['nav'])):
             return None
         if not all(not Path(path).is_symlink() and file_fingerprint(Path(path))==value['output_fingerprints'][kind]
-                   for kind,path in outputs.items()):
+                   for kind,path in expected_outputs.items()):
             return None
         return value
     except (OSError, ValueError, KeyError, TypeError):
@@ -60,7 +74,8 @@ def legacy(root, key, outputs):
 def commit(work, receipt, key, segment):
     # The receipt is the commit marker. Prepare it before exposing any output.
     staged = work/'result.json'
-    status = 'SUCCESS_WITH_WARNINGS' if segment['warnings'] else 'SUCCESS'
+    status = OBS_ONLY if segment.get('status')==OBS_ONLY else (
+        'SUCCESS_WITH_WARNINGS' if segment['warnings'] else 'SUCCESS')
     value = {**segment, 'schema_id':'gnss_logger.conversion.result','schema_version':1,
              'identity':key,'published_outputs':segment['outputs'], 'status':status}
     for kind in segment['outputs']:

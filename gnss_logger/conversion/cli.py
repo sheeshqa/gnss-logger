@@ -1,5 +1,5 @@
 """Independent conversion entry point and per-operation JSON reports."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 from collections import Counter
 from pathlib import Path
@@ -25,6 +25,8 @@ def add_command(sub):
     command.add_argument('--config',type=Path,help='TOML settings')
     command.add_argument('--output',type=Path,help='Root for unique per-operation OBS/NAV and report directories')
     command.add_argument('--dry-run',action='store_true',help='Show arguments and destinations without publishing files')
+    command.add_argument('--allow-obs-without-nav',action='store_true',
+                         help='Publish validated OBS when requested NAV is missing; incomplete status and exit code 3')
 
 
 def execute(args, sources=None):
@@ -37,6 +39,10 @@ def execute(args, sources=None):
     code=1
     try:
         settings=load(args.config)
+        if getattr(args,'allow_obs_without_nav',False):
+            if not (settings.obs and settings.nav):
+                raise ValueError('--allow-obs-without-nav requires OBS and NAV enabled')
+            settings=replace(settings,allow_obs_without_nav=True)
         root=(args.output or settings.output_root).resolve()/('conversion-'+operation)
         report['output_directory']=str(root)
         report['settings']={key:str(value) if isinstance(value,Path) else value
@@ -75,7 +81,9 @@ def execute(args, sources=None):
         elif statuses and statuses<=SUCCESS:
             report['status']='SUCCESS_WITH_WARNINGS' if any(s['warnings'] for s in report['segments']) or report['boundaries'] else 'SUCCESS'
             code=0
-        elif statuses<=SUCCESS|{'INCOMPLETE_NAVIGATION'} and 'INCOMPLETE_NAVIGATION' in statuses:
+        elif statuses<=SUCCESS|{'OBS_ONLY_INCOMPLETE_NAVIGATION'} and 'OBS_ONLY_INCOMPLETE_NAVIGATION' in statuses:
+            report['status'],code='OBS_ONLY_INCOMPLETE_NAVIGATION',3
+        elif statuses<=SUCCESS|{'INCOMPLETE_NAVIGATION','OBS_ONLY_INCOMPLETE_NAVIGATION'} and 'INCOMPLETE_NAVIGATION' in statuses:
             report['status'],code='INCOMPLETE_NAVIGATION',3
         elif statuses=={'CONFLICT'}:
             report['status']='CONFLICT'

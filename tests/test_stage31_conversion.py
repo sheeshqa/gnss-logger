@@ -266,6 +266,73 @@ class ConversionTests(TestCase):
         self.assertEqual(set(report['segments'][0]['outputs']),{'nav'})
         self.assertFalse(list(self.output.glob('*.obs')))
 
+    def test_opt_in_publishes_valid_obs_with_incomplete_receipt(self):
+        from dataclasses import replace
+        from gnss_logger.conversion.engine import convert,stage_report
+        from gnss_logger.conversion.selection import Source
+        self.nav=None
+        report=self.run_cli('--allow-obs-without-nav')
+        self.assertEqual(report['status'],'OBS_ONLY_INCOMPLETE_NAVIGATION')
+        self.assertEqual(report['exit_code'],3)
+        segment=report['segments'][0]
+        self.assertEqual(set(segment['published_outputs']),{'obs'})
+        self.assertEqual(segment['missing_outputs'],['nav'])
+        self.assertTrue(Path(segment['published_outputs']['obs']).is_file())
+        receipt=json.loads(Path(segment['result_path']).read_text())
+        self.assertEqual(receipt['status'],report['status'])
+        self.assertTrue(any('NAV missing' in w for w in segment['warnings']))
+        settings=replace(load(self.config),allow_obs_without_nav=True)
+        repeated=stage_report(settings,Source(self.source),Path(report['output_directory']),report['converter']['options'])
+        convert(settings,Source(self.source),repeated,False,report['converter'])
+        self.assertEqual(repeated['status'],'OBS_ONLY_INCOMPLETE_NAVIGATION')
+        strict=stage_report(load(self.config),Source(self.source),Path(report['output_directory']),report['converter']['options'])
+        convert(load(self.config),Source(self.source),strict,False,report['converter'])
+        self.assertEqual(strict['status'],'CONFLICT')
+        Path(segment['requested_outputs']['nav']).write_bytes(b'foreign navigation')
+        collision=stage_report(settings,Source(self.source),Path(report['output_directory']),report['converter']['options'])
+        convert(settings,Source(self.source),collision,False,report['converter'])
+        self.assertEqual(collision['status'],'CONFLICT')
+
+    def test_partial_mode_does_not_hide_invalid_obs_nav_or_process_error(self):
+        self.nav=None
+        self.obs='invalid obs'
+        self.assertEqual(self.run_cli('--allow-obs-without-nav')['status'],'FAILED')
+        self.obs=obs_text()
+        self.returncode=4
+        self.assertEqual(self.run_cli('--allow-obs-without-nav')['status'],'FAILED')
+        self.returncode=0
+        for nav in ('invalid nav',''):
+            self.nav=nav
+            result=self.run_cli('--allow-obs-without-nav')
+            self.assertEqual(result['status'],'INCOMPLETE_NAVIGATION')
+            self.assertFalse(result['segments'][0]['published_outputs'])
+        self.assertFalse(list(self.output.rglob('*.obs')))
+
+    def test_config_opt_in_and_default_strict_behavior(self):
+        self.nav=None
+        self.assertEqual(self.run_cli()['status'],'INCOMPLETE_NAVIGATION')
+        with self.config.open('a') as f:
+            f.write('allow_obs_without_nav=true\n')
+        self.assertEqual(self.run_cli()['status'],'OBS_ONLY_INCOMPLETE_NAVIGATION')
+
+    def test_complete_pair_stays_success_in_opt_in_mode(self):
+        result=self.run_cli('--allow-obs-without-nav')
+        self.assertEqual(result['status'],'SUCCESS_WITH_WARNINGS')
+        self.assertEqual(set(result['segments'][0]['published_outputs']),{'obs','nav'})
+
+    def test_partial_publication_receipt_failure_rolls_back_obs(self):
+        import errno
+        from gnss_logger.conversion.results import publish_exclusive
+        self.nav=None
+        def disk_full(source,target):
+            if source.name=='result.json':
+                raise OSError(errno.ENOSPC,'disk full')
+            publish_exclusive(source,target)
+        with patch('gnss_logger.conversion.results.publish_exclusive',disk_full):
+            report=self.run_cli('--allow-obs-without-nav')
+        self.assertEqual(report['status'],'FAILED')
+        self.assertFalse(list(self.output.rglob('*.obs')))
+
     def test_invalid_config_rejects_new_version_unknown_field_and_bad_masks(self):
         for text in ('[rinex]\nversion="3.04"', '[engine]\nunknown=true',
                      '[rinex]\nsignal_masks=["CL5D"]', '[rinex]\nobservations=["L"]'):
