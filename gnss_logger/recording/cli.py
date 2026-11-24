@@ -70,27 +70,10 @@ def preview(args, parser):
                                     identity_timeout=args.identity_timeout)
         if args.convert_config is not None and settings.daily_root is None:
             parser.error('--convert-config requires --daily-root')
-        if args.convert_config is None:
-            code,report=run_with_signals(controller,settings)
-        else:
-            from ..conversion.worker import SegmentWorker
-            worker = SegmentWorker(args.convert_config, receiver_model=args.model)
-            controller.on_segment = worker.submit
-            try:
-                code,report=run_with_signals(controller,settings)
-            finally:
-                conversion = worker.finish()
-            # The recording manifest/report describe recording integrity independently.
-            report['extensions']['gnss_logger.conversion'] = conversion
-            if controller.directory is not None:
-                from ..session import write_new_json
-                summary = controller.directory/'conversion-summary.json'
-                try:
-                    write_new_json(summary,conversion)
-                except OSError as error:
-                    conversion['summary_error'] = str(error)
-                else:
-                    conversion['summary_path'] = str(summary.resolve())
+        from ..application.recording import run_recording
+        report=run_recording(settings,controller=controller,convert_config=args.convert_config,
+                             runner=run_with_signals)
+        code=report['extensions']['gnss_logger.recording']['exit_code']
         print(json.dumps(report,ensure_ascii=False,allow_nan=False,indent=2))
         return code
     else:

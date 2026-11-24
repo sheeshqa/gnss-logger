@@ -11,6 +11,7 @@ import traceback
 import uuid
 
 from . import __version__
+from .application.receivers import discover_receivers, result_code
 from .capture.writer import UTCWriter
 from .device.ports import port_info
 from .device.requests import Probe
@@ -97,18 +98,6 @@ def progress(d):
           f"checksum_errors={d.parser.bad_checksums}", file=sys.stderr, flush=True)
 
 
-def result_code(d, probe):
-    if probe and (probe.pending or any(r["status"] in ("nak", "timeout") for r in probe.results)):
-        return 3
-    if not d.rawx_count or not d.sfrbx_count or not d.phase_valid or not d.code_valid:
-        return 2
-    if (d.decode_errors or d.parser.bad_checksums or d.parser.oversize_headers or d.gap_events
-        or d.nonmonotonic_epochs or (d.liveness and
-            (d.liveness["rawx_stale"] or d.liveness["sfrbx_stale"]))):
-        return 3
-    return 0
-
-
 def json_parameters(args):
     return {key: value.isoformat() if isinstance(value, datetime) else
             str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}
@@ -186,7 +175,7 @@ def _run_stage1(args, actual_argv, operation_stack):
             operation = "source_open"
             if args.command == "ports":
                 from serial.tools.list_ports import comports
-                report["ports"] = [port_info(port) for port in sorted(comports(), key=lambda port: port.device)]
+                report["ports"] = discover_receivers(sorted(comports(), key=lambda port: port.device))
                 state.stop_reason = "port_inventory_complete"
             else:
                 if is_serial:

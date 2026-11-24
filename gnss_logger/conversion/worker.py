@@ -1,17 +1,20 @@
 """Optional sequential conversion of committed recording artifacts."""
-from argparse import Namespace
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
 
-from .cli import execute
+from .service import ConversionRequest, execute
 from .selection import Source
 
 
 class SegmentWorker:
-    def __init__(self, config, receiver_model=None, capacity=32):
-        self.args = Namespace(config=config, output=None, dry_run=False)
+    def __init__(self, config=None, receiver_model=None, capacity=32, *, settings=None):
+        from dataclasses import replace
+        self.settings = replace(settings) if settings is not None else None
+        self.request = ConversionRequest(config=config)
+        self.args = self.request
         self.receiver_model = receiver_model
         self.queue = Queue(maxsize=capacity)
         self.closed = Event()
@@ -41,6 +44,16 @@ class SegmentWorker:
         with self._lock:
             if self._current_cancel is not None:
                 self._current_cancel.set()
+                return True
+            return False
+
+    def snapshot(self):
+        """Detached bounded auto-queue state; no percentage or CLI parsing."""
+        with self._lock:
+            return deepcopy(dict(enabled=self.enabled.is_set(), closed=self.closed.is_set(),
+                active=self._current_cancel is not None, queued=self.queue.qsize(),
+                statuses=dict(self.counts), deferred=self.deferred,
+                last_report=self.last_report, last_error=self.last_error))
 
     def _submit(self, artifact):
         source = Source(Path(artifact['path']), run_id=artifact['run_id'],
@@ -65,15 +78,18 @@ class SegmentWorker:
             try:
                 with self._lock:
                     self._current_cancel = Event()
-                report = execute(self.args, sources=[source], cancel=self._current_cancel)
-                self.counts[report['status']] += 1
-                self.last_report = report.get('report_path')
+                report = execute(self.request, sources=[source], cancel=self._current_cancel,
+                                 **({'settings': self.settings} if self.settings is not None else {}))
                 errors = report['errors'] + report['segments'][0]['errors'] if report['segments'] else report['errors']
-                if errors:
-                    self.last_error = errors[-1]
+                with self._lock:
+                    self.counts[report['status']] += 1
+                    self.last_report = report.get('report_path')
+                    if errors:
+                        self.last_error = errors[-1]
             except Exception as error:
-                self.counts['FAILED'] += 1
-                self.last_error = str(error)
+                with self._lock:
+                    self.counts['FAILED'] += 1
+                    self.last_error = str(error)
             finally:
                 with self._lock:
                     self._current_cancel = None

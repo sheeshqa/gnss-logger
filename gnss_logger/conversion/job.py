@@ -1,9 +1,9 @@
 """Threaded conversion lifecycle; report statuses remain the wire protocol."""
-from argparse import Namespace
 from copy import deepcopy
 from threading import Event, Lock, Thread
+from uuid import uuid4
 
-from .cli import execute
+from .service import ConversionRequest, execute
 
 
 class ConversionJob:
@@ -14,9 +14,14 @@ class ConversionJob:
     operations and before commit; an atomic commit is never interrupted.
     """
 
-    def __init__(self, args=None, sources=None, *, settings=None):
-        self.args = deepcopy(args) if args is not None else Namespace(
-            config=None, output=None, input=None, run_id=None, dry_run=False)
+    def __init__(self, request=None, sources=None, *, settings=None, args=None):
+        if args is not None:
+            if request is not None:
+                raise TypeError('Specify request or args, not both')
+            request = args
+        self.request = ConversionRequest.from_args(request)
+        self.operation_id = uuid4().hex
+        self.args = self.request
         self.sources = None if sources is None else tuple(sources)
         self.settings = settings
         self._cancel = Event()
@@ -47,8 +52,8 @@ class ConversionJob:
 
     def _run(self):
         try:
-            report = execute(self.args, self.sources, settings=self.settings,
-                             cancel=self._cancel, progress=self._update)
+            report = execute(self.request, self.sources, settings=self.settings,
+                             cancel=self._cancel, progress=self._update, operation_id=self.operation_id)
             published = deepcopy(report)
             with self._lock:
                 self._result = report
