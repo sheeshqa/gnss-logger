@@ -1,7 +1,9 @@
 """One reader, bounded primary ingress; opt-in Stage 2.3 daily projection."""
 from dataclasses import asdict
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
+import json
 import signal
 import sys
 import threading
@@ -9,6 +11,7 @@ import time
 import uuid
 
 from ..diagnostics import Diagnostics
+from ..device.ownership import devices
 from ..session import versions
 from . import CONTRACT_VERSION
 from .contracts import ByteAccounting, InputChunk, State, require_transition
@@ -25,7 +28,7 @@ class RecordController:
     def __init__(self, reader_factory=make_reader, journal_factory=PrimaryJournal,
                  metadata_factory=Metadata, clock=time.monotonic, utc_clock=utc_now,
                  queue_bytes=8*1024*1024, sync_interval=1.0, identity_timeout=5.0,
-                 projection_factory=None):
+                 projection_factory=None, device_registry=devices):
         if type(queue_bytes) is not int or queue_bytes <= 0:
             raise ValueError('queue_bytes must be a positive integer')
         import math
@@ -65,6 +68,14 @@ class RecordController:
         self.projection = None
         self.on_segment = None
         self.projection_factory = projection_factory
+        self.device_registry = device_registry
+        self._run_lock = threading.Lock()
+        self._started = False
+        self._snapshot_lock = threading.Lock()
+        self._snapshot_json = None
+        self._snapshot_at = 0.0
+        self._monitor_phase = 'IDLE'
+        self._publish_snapshot(force=True)
 
     def request_stop(self, reason):
         with self.lock:
@@ -108,9 +119,15 @@ class RecordController:
         before,self.state = self.state,target
         self._emit('STATE_CHANGED','lifecycle',dict(before=before.value,after=target.value))
 
-    def _accounting(self):
+    def _ingress(self):
         with self.lock:
-            received = self.received
+            return dict(received=self.received, received_sha256=self.received_hash.hexdigest(),
+                        read_calls=self.read_calls, empty_reads=self.empty_reads,
+                        last_read=self.last_read, last_data=self.last_data, overrun=self.overrun,
+                        reason=self.reason)
+
+    def _accounting(self, ingress=None):
+        received = (ingress or self._ingress())['received']
         written = self.journal.written if self.journal else 0
         synced = self.journal.synced if self.journal else 0
         opaque = self.d.parser.discarded_bytes if self.d else 0
@@ -270,14 +287,15 @@ class RecordController:
         validate_record(result)
         return result
 
-    def _details(self):
-        return dict(simulated=self.simulated,initial_port=self.settings.initial_port,python_executable=sys.executable,
+    def _details(self, ingress=None):
+        ingress = ingress or self._ingress()
+        return dict(simulated=self.simulated,initial_port=getattr(getattr(self,'settings',None),'initial_port',None),python_executable=sys.executable,
             queue_capacity_bytes=self.queue.capacity,
             queue_peak_bytes=self.queue.peak,emergency_block_limit_bytes=READ_SIZE,
             sync_interval_s=self.sync_interval,identity_timeout_s=self.identity_timeout,
-            received_sha256=self.received_hash.hexdigest(),read_calls=self.read_calls,empty_reads=self.empty_reads,
-            last_successful_read_utc=self.last_read,last_data_read_utc=self.last_data,deadline_overrun_s=self.overrun,
-            errors=list(self.errors),errors_total=self.error_count,stop_reason=self.reason,
+            received_sha256=ingress['received_sha256'],read_calls=ingress['read_calls'],empty_reads=ingress['empty_reads'],
+            last_successful_read_utc=ingress['last_read'],last_data_read_utc=ingress['last_data'],deadline_overrun_s=ingress['overrun'],
+            errors=list(self.errors),errors_total=self.error_count,stop_reason=ingress['reason'],
             actual_fingerprint=self.actual_fingerprint,paths=dict(attempt=str(self.directory) if self.directory else None,
                 manifest=str(self.directory/'manifest.json') if self.directory else None,
                 diagnostic=str(self.directory/'report.json') if self.directory else None,
@@ -285,21 +303,60 @@ class RecordController:
             diagnostics_basis='journal_written_bytes; not unarchived ingress')
 
     def snapshot(self):
+        """Detached last owner-published diagnostic, safe in any thread, even before run.
+
+        Readers only decode immutable JSON; they never inspect live recorder objects.
+        Publication is coalesced to 4 Hz, plus lifecycle/final results.
+        """
+        with self._snapshot_lock:
+            value = self._snapshot_json
+        return json.loads(value)
+
+    def _publish_snapshot(self, force=False, phase=None, report=None, operation_error=None):
+        if phase is not None:
+            self._monitor_phase = phase
+        now = time.monotonic()
+        if not force and now-self._snapshot_at < 0.25:
+            return
+        try:
+            value = self._build_snapshot() if report is None else report
+        except Exception as error:
+            # Monitoring must never bypass the recorder's drain/finally path.
+            # Keep the last consistent counters and mark this view explicitly stale.
+            if self._snapshot_json is None:
+                raise
+            value = json.loads(self._snapshot_json)
+            value['extensions']['gnss_logger.recording']['monitor_error'] = (
+                type(error).__name__+': '+str(error))
+        # Add API-only lifecycle information without altering the persisted report.
+        value = {**value, 'extensions': {**value['extensions'], 'gnss_logger.recording': {
+            **value['extensions']['gnss_logger.recording'], 'monitor_phase': self._monitor_phase}}}
+        if operation_error is not None:
+            value['extensions']['gnss_logger.recording']['operation_error'] = operation_error
+        encoded = json.dumps(value,ensure_ascii=False,allow_nan=False)
+        with self._snapshot_lock:
+            self._snapshot_json = encoded
+        self._snapshot_at = now
+
+    def _build_snapshot(self):
+        # Only the owner calls this at a consistent processing boundary.
+        ingress = self._ingress()
+        diagnostics = self.d or Diagnostics()
         complete = bool(self.artifacts and self.artifacts[0]['state']=='CLOSED_COMPLETE' and not self.errors and self.matched)
-        status = ('STOPPED_COMPLETE' if complete else 'PARTIAL' if self.received else 'FAILED') if self.state==State.STOPPED else 'ACTIVE' if self.matched else 'STARTING'
+        status = ('STOPPED_COMPLETE' if complete else 'PARTIAL' if ingress['received'] else 'FAILED') if self.state==State.STOPPED else 'ACTIVE' if self.matched else 'STARTING'
         result = dict(self._base('diagnostic'),utc=self.utc_clock(),monotonic_ns=max(0,int(self.clock()*1e9)),
-            state=self.state.value,registration=status,phase_quality=self.d.phase_tracker.report()['status'],
-            hardware_validation='NOT TESTED',accounting=self._accounting(),last_data_utc=self.last_data,
+            state=self.state.value,registration=status,phase_quality=diagnostics.phase_tracker.report()['status'],
+            hardware_validation='NOT TESTED',accounting=self._accounting(ingress),last_data_utc=ingress['last_data'],
             last_rawx_utc=self.last_rawx_utc,last_sfrbx_utc=self.last_sfrbx_utc,last_sync_utc=self.last_sync_utc,free_disk_bytes=None,
-            queue_bytes=self.queue.bytes,reconnect_attempts=0,gap_events=self.d.gap_events,
+            queue_bytes=self.queue.bytes,reconnect_attempts=0,gap_events=diagnostics.gap_events,
             errors=[f"{e['component']}: {e['error_type']}: {e['message']}" for e in self.errors],
-            extensions={'gnss_logger.recording':self._details(),'gnss_logger.diagnostics':self.d.report()})
+            extensions={'gnss_logger.recording':self._details(ingress),'gnss_logger.diagnostics':diagnostics.report()})
         self._with_projection(result)
         validate_record(result)
         return result
 
     def _with_projection(self, record):
-        if self.settings.daily_root is None:
+        if getattr(getattr(self,'settings',None),'daily_root',None) is None:
             return
         if self.projection:
             record['projection'] = self.projection.snapshot()
@@ -320,7 +377,26 @@ class RecordController:
 
     def run(self,settings,stop=None):
         """Controller protocol: returns the schema-v1 diagnostic Mapping."""
-        code,report=self._run(settings,stop)
+        with self._run_lock:
+            if self._started:
+                raise RuntimeError('Controller instances are single-use')
+            self._started = True
+        with ExitStack() as operation:
+            self._device_operation = operation
+            try:
+                code,report=self._run(settings,stop)
+            except BaseException as error:
+                # A faulty injected component/programming exception may bypass the
+                # normal terminal metadata publication. Do not leak its event sink.
+                if self.metadata is not None:
+                    try:
+                        self.metadata.close()
+                    except Exception:
+                        pass
+                self._publish_snapshot(force=True,phase='FAILED',
+                                       operation_error=type(error).__name__+': '+str(error))
+                raise
+        self._publish_snapshot(force=True,phase='FINISHED',report=report)
         return report
 
     def _run(self, settings, stop=None):
@@ -331,6 +407,7 @@ class RecordController:
         if settings.daily_root is not None:
             from ..device.ubx import UBXParser
             self.d.parser = UBXParser(max_payload=65535)
+        self._publish_snapshot(force=True,phase='STARTING')
         external = stop or threading.Event()
         thread = None
         observed_errors = 0
@@ -347,6 +424,9 @@ class RecordController:
             self.metadata = self.metadata_factory(self.directory)
             self._save('manifest.start.json',self._manifest())
             if not self.stop.is_set() and not external.is_set() and not self.interrupted:
+                lease = self._device_operation.enter_context(
+                    self.device_registry.reserve(settings.initial_port, settings.binding))
+                self._device_operation.enter_context(lease.activate())
                 self.reader = self.reader_factory(settings,self.connection_id)
                 self.simulated = bool(getattr(self.reader,'simulated',False))
                 self.connections.append(dict(connection_id=self.connection_id,port=settings.initial_port,
@@ -366,6 +446,7 @@ class RecordController:
                 deadline=None if settings.seconds is None else self.start+settings.seconds
                 thread=threading.Thread(target=self._producer,args=(deadline,external),name='gnss-single-reader',daemon=False)
                 thread.start()
+                self._publish_snapshot(force=True,phase='RUNNING')
                 last_sync=self.start
                 while not self.queue.empty_finished():
                     try:
@@ -385,6 +466,7 @@ class RecordController:
                             new_errors=self.reader_errors[observed_errors:]
                             observed_errors=len(self.reader_errors)
                         for component,error in new_errors:self._error(component,error)
+                        self._publish_snapshot()
                     except KeyboardInterrupt:
                         self.request_stop('keyboard_interrupt')
         except KeyboardInterrupt:
@@ -393,6 +475,7 @@ class RecordController:
             self._error('setup',error,storage=self.reader is not None)
         finally:
             if self.interrupted:self.request_stop('keyboard_interrupt')
+            self._publish_snapshot(force=True,phase='STOPPING')
             if thread is not None:
                 self.stop.set()
                 thread.join()  # Real reader has <=0.25 s reads; no unsafe thread termination.
@@ -419,6 +502,7 @@ class RecordController:
             if self.storage_failed and self.state in (State.STARTING,State.IDENTIFYING,State.RECORDING,State.DISCONNECTED):
                 self._transition(State.STORAGE_ERROR)
             if self.state!=State.STOPPING:self._transition(State.STOPPING)
+            self._publish_snapshot(force=True,phase='FINALIZING')
             if self.projection:
                 self._sync()
                 if not self.matched:
@@ -456,20 +540,20 @@ class RecordController:
         if self.metadata:
             for component,error in self.metadata.close():self._error(component,error,storage=True,emit=False)
         if self.errors:code=1
-        report=self.snapshot()
+        report=self._build_snapshot()
         report['extensions']['gnss_logger.recording'].update(exit_code=code,integrity=integrity,commit_manifest_required=True)
         if self.metadata:
             try:self.metadata.save('report.json',report)
             except Exception as error:
                 self._error('report',error,storage=True,emit=False);code=1
-                report=self.snapshot()
+                report=self._build_snapshot()
                 report['extensions']['gnss_logger.recording'].update(exit_code=code,integrity=integrity,commit_manifest_required=True)
         # Terminal manifest is the LAST publication and the finalization authority.
         if self.metadata:
             try:self.metadata.save('manifest.json',self._manifest(True,code,integrity))
             except Exception as error:
                 self._error('manifest',error,storage=True,emit=False);code=1
-                report=self.snapshot()
+                report=self._build_snapshot()
                 report['extensions']['gnss_logger.recording'].update(exit_code=code,integrity=integrity,commit_manifest_required=True)
         return code,report
 

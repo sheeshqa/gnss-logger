@@ -53,6 +53,37 @@ class Settings:
     interval_s: float
     allow_obs_without_nav: bool = False
 
+    def __post_init__(self):
+        for name in ('executable', 'runs_root', 'daily_root', 'output_root'):
+            if not isinstance(getattr(self, name), Path):
+                raise ValueError(name+' must be a Path')
+        if self.version != '3.02':
+            raise ValueError('Stage 3.1 supports exactly RINEX 3.02')
+        for name, allowed in (('systems', SYSTEMS), ('observations', 'CLDS'), ('groups', GROUPS)):
+            value = getattr(self, name)
+            if not isinstance(value, tuple) or not value or any(not isinstance(x, str) or x not in allowed for x in value) or len(set(value)) != len(value):
+                raise ValueError('Invalid '+name)
+        if not {'C', 'L'} <= set(self.observations):
+            raise ValueError('convbin always enables code and phase. Include C and L')
+        allowed = {mask for mask, slot in MASKS.items()
+                   if mask[0] in self.systems and GROUPS[slot-1] in self.groups}
+        if (not isinstance(self.masks, tuple) or not self.masks or
+                any(not isinstance(mask, str) or mask not in allowed for mask in self.masks) or
+                len(set(self.masks)) != len(self.masks) or
+                set(self.systems)-{mask[0] for mask in self.masks}):
+            raise ValueError('Invalid signal masks for selected systems/groups')
+        if type(self.obs) is not bool or type(self.nav) is not bool or not (self.obs or self.nav):
+            raise ValueError('Enable OBS, NAV, or both')
+        if type(self.allow_obs_without_nav) is not bool or (self.allow_obs_without_nav and not (self.obs and self.nav)):
+            raise ValueError('allow_obs_without_nav requires OBS and NAV enabled and a boolean value')
+        if not isinstance(self.receiver_model, str) or len(self.receiver_model)>20 or any(
+                ord(c)<32 or ord(c)>126 or c=='/' for c in self.receiver_model):
+            raise ValueError('Invalid receiver_model')
+        for name in ('timeout_s', 'interval_s'):
+            value = getattr(self, name)
+            if type(value) not in (int, float) or not math.isfinite(value) or value<=0:
+                raise ValueError(name+' must be finite and positive')
+
 
 def load(path=None):
     base = default_root()

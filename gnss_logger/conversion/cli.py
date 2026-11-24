@@ -1,5 +1,6 @@
 """Independent conversion entry point and per-operation JSON reports."""
 from dataclasses import asdict, replace
+from copy import deepcopy
 import json
 from collections import Counter
 from pathlib import Path
@@ -10,7 +11,7 @@ from .. import __version__
 from ..session import utc_now, write_new_json
 from ..recording.storage import publish_exclusive
 from .config import default_root, load
-from .engine import boundaries, convert, probe, stage_report
+from .engine import boundaries, check_cancel, convert, probe, stage_report
 from .selection import select
 from .results import SUCCESS
 
@@ -29,7 +30,7 @@ def add_command(sub):
                          help='Publish validated OBS when requested NAV is missing; incomplete status and exit code 3')
 
 
-def execute(args, sources=None):
+def execute(args, sources=None, *, settings=None, cancel=None, progress=None):
     operation=uuid.uuid4().hex
     root=(args.output or default_root()/'data/rinex').resolve()/('conversion-'+operation)
     report=dict(schema_version=2,schema_id='gnss_logger.conversion',operation_id=operation,
@@ -38,7 +39,7 @@ def execute(args, sources=None):
         converter={},selected_inputs=[],segments=[],errors=[],warnings=[],boundaries=[])
     code=1
     try:
-        settings=load(args.config)
+        settings=load(args.config) if settings is None else replace(settings)
         if getattr(args,'allow_obs_without_nav',False):
             if not (settings.obs and settings.nav):
                 raise ValueError('--allow-obs-without-nav requires OBS and NAV enabled')
@@ -48,16 +49,18 @@ def execute(args, sources=None):
         report['settings']={key:str(value) if isinstance(value,Path) else value
                             for key,value in asdict(settings).items()}
         report['settings']['output_root']=str(root)
+        check_cancel(cancel)
         sources=select(settings,args.input,args.run_id) if sources is None else sources
         report['selected_inputs']=[str(source.path) for source in sources]
         report['segments']=[dict(source={**asdict(source),'path':str(source.path)},
                                  status='NOT_RUN',validation={},warnings=[],errors=[])
                             for source in sources]
         if args.dry_run:
-            probe(settings,report['converter'])
+            probe(settings,report['converter'], **({'cancel':cancel} if cancel is not None else {}))
         if not args.dry_run:
             root.mkdir(parents=True,exist_ok=True)
         for index,(source,segment) in enumerate(zip(sources,report['segments'])):
+            check_cancel(cancel)
             try:
                 segment_root=root
                 if sum(s.path.stem.casefold()==source.path.stem.casefold() for s in sources)>1:
@@ -65,13 +68,17 @@ def execute(args, sources=None):
                     if not args.dry_run:
                         segment_root.mkdir()
                 segment.update(stage_report(settings,source,segment_root,report['converter'].get('options')))
-                convert(settings,source,segment,args.dry_run,report['converter'])
+                convert(settings,source,segment,args.dry_run,report['converter'],
+                        **({'cancel':cancel} if cancel is not None else {}))
             except HANDLED as error:
                 segment['status']='FAILED'
                 segment['errors'].append(str(error))
             except KeyboardInterrupt:
                 segment['status']='INTERRUPTED'
                 raise
+            if progress is not None:
+                progress(deepcopy(report))
+        check_cancel(cancel)
         report['boundaries']=boundaries(report['segments'],settings.interval_s)
         statuses={segment['status'] for segment in report['segments']}-{'SKIPPED'}
         if report['segments'] and not statuses:

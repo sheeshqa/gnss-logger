@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 import uuid
 
 from ..capture.framing import Framer
@@ -17,13 +18,41 @@ from .config import COMBINED, GNSS, GROUPS, MASKS, SIGNALS
 from .rinex import observations, navigation
 from .results import OBS_ONLY, commit, existing, identity, legacy
 
-def invoke(args, cwd, timeout):
+
+def check_cancel(cancel):
+    if cancel is not None and cancel.is_set():
+        raise KeyboardInterrupt('Conversion cancelled')
+
+
+def invoke(args, cwd, timeout, cancel=None):
     # convbin can write progress for every epoch. Limit the size retained in JSON.
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         try:
-            result = subprocess.run(args,cwd=cwd,shell=False,stdin=subprocess.DEVNULL,
-                                    stdout=stdout,stderr=stderr,timeout=timeout)
-            code=result.returncode
+            check_cancel(cancel)
+            if cancel is None:
+                result = subprocess.run(args,cwd=cwd,shell=False,stdin=subprocess.DEVNULL,
+                                        stdout=stdout,stderr=stderr,timeout=timeout)
+                code=result.returncode
+                check_cancel(cancel)
+            else:
+                process = subprocess.Popen(args,cwd=cwd,shell=False,stdin=subprocess.DEVNULL,
+                                           stdout=stdout,stderr=stderr)
+                deadline = time.monotonic()+timeout
+                try:
+                    while True:
+                        check_cancel(cancel)
+                        remaining = deadline-time.monotonic()
+                        if remaining <= 0:
+                            raise subprocess.TimeoutExpired(args, timeout)
+                        try:
+                            code = process.wait(timeout=min(.05, remaining))
+                            break
+                        except subprocess.TimeoutExpired:
+                            pass
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait()
         except subprocess.TimeoutExpired:
             code=None
         logs={}
@@ -35,7 +64,7 @@ def invoke(args, cwd, timeout):
         return dict(returncode=code,timed_out=code is None,**logs)
 
 
-def probe(settings, identity):
+def probe(settings, identity, cancel=None):
     exe=settings.executable
     if not exe.is_file():
         raise ValueError('convbin executable not found: '+str(exe))
@@ -43,10 +72,10 @@ def probe(settings, identity):
         raise ValueError('Select a native convbin executable, not a shell wrapper')
     identity.update(path=str(exe),**file_fingerprint(exe))
     with tempfile.TemporaryDirectory(prefix='gnss-convbin-probe-') as cwd:
-        help_result=invoke([str(exe)],cwd,10)
+        help_result=invoke([str(exe)],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
         help_text=help_result['stdout']+'\n'+help_result['stderr']
         if not re.search(r'(?m)^\s+-mask\b',help_text):
-            help_result=invoke([str(exe),'--help'],cwd,10)
+            help_result=invoke([str(exe),'--help'],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
             help_text=help_result['stdout']+'\n'+help_result['stderr']
         options=set(re.findall(r'(?m)^\s+(-[a-z][a-z0-9-]*)(?=\s|$)',help_text))
         identity.update(help=help_result,options=sorted(options))
@@ -63,7 +92,7 @@ def probe(settings, identity):
             raise ValueError('Unsupported convbin interface. Missing: '+', '.join(missing or ['UBX']))
         # Some older builds print help for this unknown switch.
         try:
-            version=invoke([str(exe),'--version'],cwd,10)
+            version=invoke([str(exe),'--version'],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
             version_text=(version['stdout']+'\n'+version['stderr']).strip()
             identity['version']=version_text if (version['returncode']==0
                 and len(version_text.splitlines())==1 and 'rtklib' in version_text.lower()) else None
@@ -141,7 +170,8 @@ def stage_report(settings, source, root, options):
                 validation={},published_outputs={},warnings=[],errors=[])
 
 
-def convert(settings, source, report, dry_run, engine):
+def convert(settings, source, report, dry_run, engine, cancel=None):
+    check_cancel(cancel)
     work=Path(report['cwd'])
     outputs={key:Path(value) for key,value in report['outputs'].items()}
     report['status']='FAILED'
@@ -182,6 +212,7 @@ def convert(settings, source, report, dry_run, engine):
         work=Path(folder)
         report['cwd']=folder
         fingerprint=snapshot(source,work/'input.ubx')
+        check_cancel(cancel)
         report['source'].update(fingerprint)
         if fingerprint['opaque_bytes'] or fingerprint['tail_bytes'] or fingerprint['decode_errors']:
             raise ValueError('UBX contains opaque, incomplete or undecodable data')
@@ -194,14 +225,15 @@ def convert(settings, source, report, dry_run, engine):
             raise ValueError('UBX has no usable RAWX measurements for OBS')
         if not engine:
             try:
-                probe(settings,engine)
+                probe(settings,engine, **({'cancel':cancel} if cancel is not None else {}))
             except BaseException:
                 engine.clear()
                 raise
         report['args']=command(settings,source,engine['options'])
         if file_fingerprint(settings.executable)!=dict(bytes=engine['bytes'],sha256=engine['sha256']):
             raise ValueError('convbin executable changed after compatibility check')
-        report['process']=invoke(report['args'],work,settings.timeout_s)
+        report['process']=invoke(report['args'],work,settings.timeout_s,
+                                 **({'cancel':cancel} if cancel is not None else {}))
         if report['process']['timed_out']:
             raise ValueError('convbin timed out after '+str(settings.timeout_s)+' seconds')
         if report['process']['returncode']!=0:
@@ -282,6 +314,7 @@ def convert(settings, source, report, dry_run, engine):
                 report['status']='INCOMPLETE_NAVIGATION'
                 return
         report['output_fingerprints']={key:file_fingerprint(work/('output.'+key)) for key in outputs}
+        check_cancel(cancel)
         try:
             commit(work,receipt,identity(settings,report,engine),report)
         except FileExistsError as error:

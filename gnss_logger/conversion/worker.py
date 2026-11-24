@@ -3,7 +3,7 @@ from argparse import Namespace
 from collections import Counter
 from pathlib import Path
 from queue import Empty, Full, Queue
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 
 from .cli import execute
 from .selection import Source
@@ -15,6 +15,10 @@ class SegmentWorker:
         self.receiver_model = receiver_model
         self.queue = Queue(maxsize=capacity)
         self.closed = Event()
+        self.enabled = Event()
+        self.enabled.set()
+        self._lock = Lock()
+        self._current_cancel = None
         self.counts = Counter()
         self.deferred = 0
         self.last_report = None
@@ -23,14 +27,32 @@ class SegmentWorker:
         self.thread.start()
 
     def submit(self, artifact):
+        with self._lock:
+            if self.closed.is_set() or not self.enabled.is_set():
+                return False
+            return self._submit(artifact)
+
+    def set_enabled(self, enabled):
+        """Control admission only; queued and current work finish normally."""
+        with self._lock:
+            self.enabled.set() if enabled else self.enabled.clear()
+
+    def cancel_current(self):
+        with self._lock:
+            if self._current_cancel is not None:
+                self._current_cancel.set()
+
+    def _submit(self, artifact):
         source = Source(Path(artifact['path']), run_id=artifact['run_id'],
                         attempt_id=artifact['attempt_id'], artifact_id=artifact['artifact_id'],
                         size=artifact['bytes'], sha256=artifact['sha256'],
                         utc_day=artifact['utc_day'], receiver_model=self.receiver_model)
         try:
             self.queue.put_nowait(source)
+            return True
         except Full:
             self.deferred += 1
+            return False
 
     def _run(self):
         while True:
@@ -41,7 +63,9 @@ class SegmentWorker:
                     return
                 continue
             try:
-                report = execute(self.args, sources=[source])
+                with self._lock:
+                    self._current_cancel = Event()
+                report = execute(self.args, sources=[source], cancel=self._current_cancel)
                 self.counts[report['status']] += 1
                 self.last_report = report.get('report_path')
                 errors = report['errors'] + report['segments'][0]['errors'] if report['segments'] else report['errors']
@@ -50,9 +74,13 @@ class SegmentWorker:
             except Exception as error:
                 self.counts['FAILED'] += 1
                 self.last_error = str(error)
+            finally:
+                with self._lock:
+                    self._current_cancel = None
 
     def finish(self):
-        self.closed.set()
+        with self._lock:
+            self.closed.set()
         self.thread.join()
         return dict(statuses=dict(self.counts), deferred=self.deferred,
                     last_report=self.last_report, last_error=self.last_error)

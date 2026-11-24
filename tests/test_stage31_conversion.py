@@ -102,6 +102,24 @@ class ConversionTests(TestCase):
             self.assertEqual(json.loads(Path(report['report_path']).read_text(encoding='utf-8')),report)
         return report
 
+    def popen_fixture(self, args, **kwargs):
+        """Synchronous Popen adapter for the existing controlled converter."""
+        result = self.subprocess_fixture(args, **kwargs)
+
+        class Process:
+            returncode = result.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+            def poll(self):
+                return self.returncode
+
+            def kill(self):
+                self.returncode = -9
+
+        return Process()
+
     def test_default_settings_and_success_report(self):
         settings=load(self.config)
         self.assertEqual(settings.version,'3.02')
@@ -464,6 +482,7 @@ class ConversionTests(TestCase):
               '--usb-location','1-9','--seconds','100','--convert-config',str(self.config)]
         with patch('gnss_logger.recording.controller.RecordController',side_effect=controller), \
                 patch('gnss_logger.conversion.engine.subprocess.run',self.subprocess_fixture), \
+                patch('gnss_logger.conversion.engine.subprocess.Popen',self.popen_fixture), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(args),0)
         report=json.loads(output.getvalue())

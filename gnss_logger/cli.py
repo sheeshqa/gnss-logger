@@ -14,7 +14,9 @@ from . import __version__
 from .capture.writer import UTCWriter
 from .device.ports import port_info
 from .device.requests import Probe
-from .device.transport import open_port, send_read_only
+from .device.access import open_device as open_port
+from .device.ownership import devices
+from .device.transport import send_read_only
 from .diagnostics import Diagnostics
 from .engine import RunState, run_source
 from .mock import MockReceiver
@@ -131,6 +133,13 @@ def main(argv=None):
         p.error("--baud must be > 0")
     if args.command == "mock" and args.epochs <= 0:
         p.error("--epochs must be > 0")
+    # Reserve for the entire diagnostic operation, including report finalization.
+    with ExitStack() as operation:
+        return _run_stage1(args, actual_argv, operation)
+
+
+def _run_stage1(args, actual_argv, operation_stack):
+    is_serial = args.command in ("serial", "diagnose")
     d = Diagnostics(getattr(args, "expected_hz", 1))
     state = RunState()
     report = dict(schema_version=2, session_id=uuid.uuid4().hex, tool_version=__version__, started_utc=utc_now(),
@@ -182,6 +191,8 @@ def main(argv=None):
             else:
                 if is_serial:
                     try:
+                        lease = operation_stack.enter_context(devices.reserve(args.port))
+                        operation_stack.enter_context(lease.activate())
                         connection = stack.enter_context(open_port(args.port, args.baud))
                     except Exception as error:
                         raise OSError(f"Не удалось открыть {args.port}. Порт отсутствует, занят или недоступен; "

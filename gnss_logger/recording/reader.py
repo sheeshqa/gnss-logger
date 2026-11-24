@@ -2,7 +2,8 @@
 from datetime import datetime, timezone
 import time
 
-from ..device.transport import open_port, send_read_only
+from ..device.access import open_device as open_port
+from ..device.transport import send_read_only
 from ..device.ubx import MON_VER_POLL
 from .contracts import InputChunk
 
@@ -47,4 +48,4 @@ def make_reader(settings, connection_id):
     # Model is verified later, from the one incoming stream, after journaling begins.
     if not settings.binding.matches(dict(usb, model=settings.binding.model)):
         raise OSError('COM port USB attributes do not match the explicit receiver binding')
-    return SerialReader(open_port(port.device, settings.baud), connection_id, usb)
+    return SerialReader(open_port(port.device, settings.baud, identity=usb), connection_id, usb)
