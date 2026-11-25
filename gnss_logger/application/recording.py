@@ -38,13 +38,14 @@ def run_recording(settings, *, controller=None, stop=None, convert_config=None,
 
 class RecordingHandle:
     """Single-use asynchronous owner. Stop is a request; result marks completion."""
-    def __init__(self, settings, *, controller=None, convert_config=None, conversion_settings=None):
+    def __init__(self, settings, *, controller=None, convert_config=None, conversion_settings=None, worker_factory=None):
         if (convert_config is not None or conversion_settings is not None) and settings.daily_root is None:
             raise ValueError('Automatic conversion requires daily_root')
         self.settings = settings
         self.controller = controller if controller is not None else RecordController()
         self.convert_config = convert_config
         self.conversion_settings = conversion_settings
+        self._worker_factory = worker_factory
         self._stop = Event()
         self._done = Event()
         self._lock = Lock()
@@ -93,7 +94,7 @@ class RecordingHandle:
         try:
             with self._lock:
                 if self.convert_config is not None or self.conversion_settings is not None:
-                    self._worker = SegmentWorker(self.convert_config, receiver_model=self.settings.binding.model,
+                    self._worker = (self._worker_factory or SegmentWorker)(self.convert_config, receiver_model=self.settings.binding.model,
                                                  settings=self.conversion_settings)
                     self._worker.set_enabled(self._auto_enabled)
             report = run_recording(self.settings, controller=self.controller,

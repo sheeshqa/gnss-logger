@@ -10,12 +10,13 @@ from .selection import Source
 
 
 class SegmentWorker:
-    def __init__(self, config=None, receiver_model=None, capacity=32, *, settings=None):
+    def __init__(self, config=None, receiver_model=None, capacity=32, *, settings=None, execute_call=None):
         from dataclasses import replace
         self.settings = replace(settings) if settings is not None else None
         self.request = ConversionRequest(config=config)
         self.args = self.request
         self.receiver_model = receiver_model
+        self._execute_call = execute_call
         self.queue = Queue(maxsize=capacity)
         self.closed = Event()
         self.enabled = Event()
@@ -78,7 +79,7 @@ class SegmentWorker:
             try:
                 with self._lock:
                     self._current_cancel = Event()
-                report = execute(self.request, sources=[source], cancel=self._current_cancel,
+                report = (self._execute_call or execute)(self.request, sources=[source], cancel=self._current_cancel,
                                  **({'settings': self.settings} if self.settings is not None else {}))
                 errors = report['errors'] + report['segments'][0]['errors'] if report['segments'] else report['errors']
                 with self._lock:

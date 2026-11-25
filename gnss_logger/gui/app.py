@@ -1,0 +1,88 @@
+"""Optional GUI entry point; CLI and imports stay usable without Qt installed."""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='GNSS Logger: recording and UBX to RINEX conversion GUI')
+    parser.add_argument('--mock', action='store_true', help='synthetic receiver and real recorder with injected source; no COM')
+    parser.add_argument('--smoke-test', action='store_true', help='automated mock lifecycle and exit')
+    args = parser.parse_args(argv)
+    if args.smoke_test and not args.mock:
+        parser.error('--smoke-test requires --mock')
+    if not (3, 10) <= sys.version_info[:2] < (3, 16):
+        message = 'GUI requires Python 3.10–3.15; the independent CLI remains available.'
+        if sys.stderr is not None:
+            print(message, file=sys.stderr)
+        return 2
+    try:
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication
+    except ModuleNotFoundError as error:
+        if not (error.name or '').startswith('PySide6'):
+            raise
+        message = 'Optional GUI dependency missing. Install gnss-logger[gui] in a separate GUI environment.'
+        if sys.stderr is not None:
+            print(message, file=sys.stderr)
+        elif sys.platform == 'win32':
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, message, 'GNSS Logger', 0x10)
+        return 2
+    from .main_window import MainWindow
+    from .receivers import ReceiverBackend, MockReceiverBackend
+
+    app = QApplication([sys.argv[0]])
+    app.setApplicationName('GNSS Logger')
+    app.setOrganizationName('GNSS Logger')
+    window = MainWindow(MockReceiverBackend() if args.mock else ReceiverBackend(), operational=True)
+    window.show()
+    smoke = {'heartbeat': 0, 'identified': False, 'started': False, 'stopped': False, 'timeout': False}
+    if args.smoke_test:
+        mock_root = window.mock_root
+        smoke['output'] = str(mock_root)
+        timer = QTimer(window)
+        timer.setInterval(25)
+
+        def drive():
+            smoke['heartbeat'] += 1
+            coordinator = window.coordinator
+            if coordinator.devices and not coordinator.busy and not smoke['identified']:
+                smoke['identified'] = coordinator.identify(seconds=2)
+            if coordinator.view()['can_start'] and not smoke['started']:
+                smoke['started'] = coordinator.start_recording(dict(
+                    output=mock_root/'runs', daily_root=mock_root/'daily', seconds=None,
+                    station='MOCK', expected_hz=1.0))
+            for event in window.last_events:
+                raw = event['data'].get('recording') or {}
+                epochs = raw.get('extensions', {}).get('gnss_logger.diagnostics', {}).get('RAWX', {}).get('epochs', 0)
+                if epochs >= 2 and not smoke['stopped']:
+                    smoke['stopped'] = coordinator.stop_recording()
+            if window.result_received and not coordinator.busy:
+                coordinator.request_shutdown()
+
+        def timeout():
+            if not window.coordinator.shutdown_complete:
+                smoke['timeout'] = True
+                window.coordinator.request_shutdown()
+
+        timer.timeout.connect(drive)
+        timer.start()
+        QTimer.singleShot(0, window.coordinator.refresh_devices)
+        QTimer.singleShot(15000, timeout)
+    code = app.exec()
+    if args.smoke_test:
+        report = getattr(window, 'latest_record_report', None) or {}
+        detail = report.get('extensions', {}).get('gnss_logger.recording', {})
+        passed = (smoke['started'] and smoke['identified'] and smoke['stopped']
+                  and not smoke['timeout'] and smoke['heartbeat'] > 1
+                  and window.result_received and window.delivery_on_ui_thread
+                  and window.coordinator.shutdown_complete and detail.get('exit_code') == 0
+                  and report.get('registration') == 'STOPPED_COMPLETE'
+                  and report.get('accounting', {}).get('unarchived') == 0)
+        if sys.stdout is not None:
+            print(json.dumps(dict(smoke=smoke, passed=passed,
+                                  ui_thread_delivery=window.delivery_on_ui_thread)))
+        return 0 if passed else 1
+    return code

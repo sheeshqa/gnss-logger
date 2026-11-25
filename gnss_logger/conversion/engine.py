@@ -64,7 +64,8 @@ def invoke(args, cwd, timeout, cancel=None):
         return dict(returncode=code,timed_out=code is None,**logs)
 
 
-def probe(settings, identity, cancel=None):
+def probe(settings, identity, cancel=None, *, invoke_call=None):
+    runner = invoke_call or invoke
     exe=settings.executable
     if not exe.is_file():
         raise ValueError('convbin executable not found: '+str(exe))
@@ -72,10 +73,10 @@ def probe(settings, identity, cancel=None):
         raise ValueError('Select a native convbin executable, not a shell wrapper')
     identity.update(path=str(exe),**file_fingerprint(exe))
     with tempfile.TemporaryDirectory(prefix='gnss-convbin-probe-') as cwd:
-        help_result=invoke([str(exe)],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
+        help_result=runner([str(exe)],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
         help_text=help_result['stdout']+'\n'+help_result['stderr']
         if not re.search(r'(?m)^\s+-mask\b',help_text):
-            help_result=invoke([str(exe),'--help'],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
+            help_result=runner([str(exe),'--help'],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
             help_text=help_result['stdout']+'\n'+help_result['stderr']
         options=set(re.findall(r'(?m)^\s+(-[a-z][a-z0-9-]*)(?=\s|$)',help_text))
         identity.update(help=help_result,options=sorted(options))
@@ -92,7 +93,7 @@ def probe(settings, identity, cancel=None):
             raise ValueError('Unsupported convbin interface. Missing: '+', '.join(missing or ['UBX']))
         # Some older builds print help for this unknown switch.
         try:
-            version=invoke([str(exe),'--version'],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
+            version=runner([str(exe),'--version'],cwd,10, **({'cancel':cancel} if cancel is not None else {}))
             version_text=(version['stdout']+'\n'+version['stderr']).strip()
             identity['version']=version_text if (version['returncode']==0
                 and len(version_text.splitlines())==1 and 'rtklib' in version_text.lower()) else None
@@ -170,7 +171,7 @@ def stage_report(settings, source, root, options):
                 validation={},published_outputs={},warnings=[],errors=[])
 
 
-def convert(settings, source, report, dry_run, engine, cancel=None):
+def convert(settings, source, report, dry_run, engine, cancel=None, *, invoke_call=None):
     check_cancel(cancel)
     work=Path(report['cwd'])
     outputs={key:Path(value) for key,value in report['outputs'].items()}
@@ -225,14 +226,15 @@ def convert(settings, source, report, dry_run, engine, cancel=None):
             raise ValueError('UBX has no usable RAWX measurements for OBS')
         if not engine:
             try:
-                probe(settings,engine, **({'cancel':cancel} if cancel is not None else {}))
+                probe(settings,engine, **({'cancel':cancel} if cancel is not None else {}),
+                      **({'invoke_call':invoke_call} if invoke_call is not None else {}))
             except BaseException:
                 engine.clear()
                 raise
         report['args']=command(settings,source,engine['options'])
         if file_fingerprint(settings.executable)!=dict(bytes=engine['bytes'],sha256=engine['sha256']):
             raise ValueError('convbin executable changed after compatibility check')
-        report['process']=invoke(report['args'],work,settings.timeout_s,
+        report['process']=(invoke_call or invoke)(report['args'],work,settings.timeout_s,
                                  **({'cancel':cancel} if cancel is not None else {}))
         if report['process']['timed_out']:
             raise ValueError('convbin timed out after '+str(settings.timeout_s)+' seconds')

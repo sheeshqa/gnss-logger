@@ -14,7 +14,7 @@ class ConversionJob:
     operations and before commit; an atomic commit is never interrupted.
     """
 
-    def __init__(self, request=None, sources=None, *, settings=None, args=None):
+    def __init__(self, request=None, sources=None, *, settings=None, args=None, execute_call=None):
         if args is not None:
             if request is not None:
                 raise TypeError('Specify request or args, not both')
@@ -24,6 +24,7 @@ class ConversionJob:
         self.args = self.request
         self.sources = None if sources is None else tuple(sources)
         self.settings = settings
+        self._execute_call = execute_call
         self._cancel = Event()
         self._done = Event()
         self._lock = Lock()
@@ -52,7 +53,7 @@ class ConversionJob:
 
     def _run(self):
         try:
-            report = execute(self.request, self.sources, settings=self.settings,
+            report = (self._execute_call or execute)(self.request, self.sources, settings=self.settings,
                              cancel=self._cancel, progress=self._update, operation_id=self.operation_id)
             published = deepcopy(report)
             with self._lock:

@@ -47,7 +47,7 @@ class ConversionRequest:
                       for name, field in cls.__dataclass_fields__.items()})
 
 
-def execute(request, sources=None, settings=None, cancel=None, progress=None, *, operation_id=None):
+def execute(request, sources=None, settings=None, cancel=None, progress=None, *, operation_id=None, invoke_call=None):
     operation=operation_id or uuid.uuid4().hex
     if operation_id is not None and (not isinstance(operation_id,str) or len(operation_id) != 32
             or any(c not in '0123456789abcdef' for c in operation_id)):
@@ -76,7 +76,8 @@ def execute(request, sources=None, settings=None, cancel=None, progress=None, *,
                                  status='NOT_RUN',validation={},warnings=[],errors=[])
                             for source in sources]
         if request.dry_run:
-            probe(settings,report['converter'], **({'cancel':cancel} if cancel is not None else {}))
+            probe(settings,report['converter'], **({'cancel':cancel} if cancel is not None else {}),
+                  **({'invoke_call':invoke_call} if invoke_call is not None else {}))
         if not request.dry_run:
             root.mkdir(parents=True,exist_ok=True)
         for index,(source,segment) in enumerate(zip(sources,report['segments'])):
@@ -89,7 +90,8 @@ def execute(request, sources=None, settings=None, cancel=None, progress=None, *,
                         segment_root.mkdir()
                 segment.update(stage_report(settings,source,segment_root,report['converter'].get('options')))
                 convert(settings,source,segment,request.dry_run,report['converter'],
-                        **({'cancel':cancel} if cancel is not None else {}))
+                        **({'cancel':cancel} if cancel is not None else {}),
+                        **({'invoke_call':invoke_call} if invoke_call is not None else {}))
             except HANDLED as error:
                 segment['status']='FAILED'
                 segment['errors'].append(str(error))
