@@ -17,7 +17,7 @@ from .pages.settings import SettingsPage
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, provider=None, *, operational=False, conversion_backend=None):
+    def __init__(self, provider=None, *, operational=False, conversion_backend=None, mock_root=None, preferences_path=None):
         super().__init__()
         self.operational = operational
         self.setWindowTitle(self.tr('GNSS Logger — Stage 4.2') + (' — MOCK' if provider else ''))
@@ -34,6 +34,8 @@ class MainWindow(QMainWindow):
         self.result_received = False
         self.delivery_on_ui_thread = True
         self._close_requested = False
+        self._history_recording_roots = set()
+        self._history_conversion_roots = set()
         central = QWidget()
         outer = QVBoxLayout(central)
         banner = QLabel(self.tr('MOCK — только демонстрация интерфейса. Нет аппаратной записи и RINEX.')
@@ -52,14 +54,21 @@ class MainWindow(QMainWindow):
         self.sidebar.setMaximumWidth(190)
         content.addWidget(self.sidebar)
         self.stack = QStackedWidget()
-        self.mock_root = (Path(tempfile.gettempdir()) / 'GNSS-GUI-MOCK' / uuid4().hex
+        backend_root = getattr(conversion_backend, 'mock_root', None)
+        if mock_root is not None and backend_root is not None and Path(mock_root).resolve() != Path(backend_root).resolve():
+            raise ValueError('Mock backend and window roots differ')
+        self.mock_root = (Path(mock_root or backend_root or (Path(tempfile.gettempdir()) / 'GNSS-GUI-MOCK' / uuid4().hex)).resolve()
                           if operational and provider.is_mock else None)
+        if mock_root is not None and self.mock_root is None:
+            raise ValueError('mock_root requires a mock provider')
+        if self.mock_root is not None and preferences_path is not None and not Path(preferences_path).resolve().is_relative_to(self.mock_root):
+            raise ValueError('Mock preferences must be inside mock_root')
         self.recording = (RecordingPage(mock=provider.is_mock, operational=True, mock_root=self.mock_root)
                           if operational else RecordingPage(provider is not None))
         self.conversion = (ConversionPage(operational=True, mock=provider.is_mock, mock_root=self.mock_root)
                            if operational else ConversionPage())
-        self.history = HistoryPage()
-        self.settings = SettingsPage()
+        self.history = HistoryPage(operational=operational)
+        self.settings = SettingsPage(operational=operational)
         for page in (self.recording, self.conversion, self.history, self.settings):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -94,6 +103,7 @@ class MainWindow(QMainWindow):
             self.conversion_coordinator.state_changed.connect(self.conversion.apply_state)
             self.conversion_coordinator.events_ready.connect(self._conversion_events)
             self.conversion_coordinator.result_ready.connect(self.conversion.render_view)
+            self.conversion_coordinator.result_ready.connect(lambda _: self._refresh_history())
             self.conversion_coordinator.ready_to_close.connect(self._maybe_close, Qt.ConnectionType.QueuedConnection)
             self.conversion.load_requested.connect(self.conversion_coordinator.load)
             self.conversion.run_requested.connect(self._run_conversion)
@@ -112,6 +122,23 @@ class MainWindow(QMainWindow):
             self.coordinator.identity_changed.connect(self.recording.render_identity)
             self.coordinator.record_result.connect(self._record_result)
             self.coordinator.auto_result.connect(self.recording.render_auto_result)
+            self.coordinator.auto_result.connect(lambda _: self._refresh_history())
+            from .history_coordinator import HistoryCoordinator
+            from .settings_bridge import SettingsBridge
+            from ..conversion.config import default_root
+            self.history_coordinator = HistoryCoordinator(self)
+            self.history.refresh_requested.connect(self.history_coordinator.refresh)
+            self.history.selection_requested.connect(self.history_coordinator.select)
+            self.history.conversion_requested.connect(self._history_conversion)
+            self.history_coordinator.snapshot_ready.connect(self.history.render_snapshot)
+            self.history_coordinator.detail_ready.connect(self.history.render_detail)
+            self.history_coordinator.state_changed.connect(self.history.apply_state)
+            self.history_coordinator.error_raised.connect(self._error)
+            self.history_coordinator.ready_to_close.connect(self._maybe_close, Qt.ConnectionType.QueuedConnection)
+            path = Path(preferences_path) if preferences_path is not None else (self.mock_root or default_root()) / 'config' / 'gui-preferences.json'
+            self.settings_bridge = SettingsBridge(self, path)
+            self.settings_bridge.ready_to_close.connect(self._maybe_close, Qt.ConnectionType.QueuedConnection)
+            self.history_coordinator.configure_roots(*[self.settings_bridge.defaults['history'][key] for key in ('recording_roots', 'conversion_roots', 'stage1_roots')])
         else:
             self.recording.start.clicked.connect(self._start_demo)
             self.recording.stop.clicked.connect(self.coordinator.stop_demo)
@@ -129,11 +156,42 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _maybe_close(self):
-        if self.coordinator.shutdown_complete:
-            if not self.conversion_coordinator.closing:
-                self.conversion_coordinator.request_shutdown()
-            if self.conversion_coordinator.shutdown_complete:
-                self.close()
+        if not self._close_requested and self.coordinator.shutdown_complete:
+            self.close()
+            return
+        if self._close_requested and all(c.shutdown_complete for c in (self.coordinator, self.conversion_coordinator, self.history_coordinator, self.settings_bridge)):
+            self.close()
+
+    @Slot(object)
+    def _history_conversion(self, detail):
+        if not detail.get('terminal'):
+            self._error(self.tr('Выберите завершённую сессию.'))
+            return
+        if detail.get('stage') == 2 and detail.get('run_id'):
+            key = Path(detail['session_key'])
+            matches = [row for row in self.history._sessions if row.get('run_id') == detail['run_id']]
+            if key.parent.name != 'attempts' or len(matches) != 1:
+                self._error(self.tr('Для run_id найдено несколько попыток; выберите завершённый UBX вручную.'))
+                return
+            self.conversion.runs_root.setText(str(key.parent.parent.parent))
+            self.conversion.source_kind.setCurrentIndex(self.conversion.source_kind.findData('session'))
+            self.conversion.session_id.setText(detail['run_id'])
+            self.sidebar.setCurrentRow(1)
+            return
+        files = [row.get('path') for row in detail.get('ubx_files', []) if row.get('path')]
+        if len(files) != 1:
+            self._error(self.tr('Для выбранной сессии нужен один завершённый UBX; выберите источник вручную.'))
+            return
+        self.conversion.source_kind.setCurrentIndex(self.conversion.source_kind.findData('file'))
+        self.conversion.source.setText(files[0])
+        self.sidebar.setCurrentRow(1)
+
+    def _refresh_history(self):
+        roots = self.settings_bridge.values['history']
+        self.history_coordinator.configure_roots(
+            list(dict.fromkeys(roots['recording_roots'] + sorted(self._history_recording_roots))),
+            list(dict.fromkeys(roots['conversion_roots'] + sorted(self._history_conversion_roots))),
+            roots['stage1_roots'])
 
     @Slot(bool)
     def _auto_toggled(self, enabled):
@@ -184,6 +242,7 @@ class MainWindow(QMainWindow):
                 if self.coordinator.view()['auto_capable']:
                     self._error(self.tr('Внимание: ручная и Auto могут повторно конвертировать один источник; каталоги изолированы'))
             if self.conversion_coordinator.start(request, settings):
+                self._history_conversion_roots.add(str(settings.output_root))
                 self.sidebar.setCurrentRow(1)
         except (ValueError, OSError, TypeError) as error:
             self._error(str(error))
@@ -221,6 +280,9 @@ class MainWindow(QMainWindow):
                 self.coordinator.configure_auto()
             self.result_received = False
             if self.coordinator.start_recording(parameters):
+                self._history_recording_roots.update(str(p) for p in (parameters['output'], parameters['daily_root']) if p is not None)
+                if self.recording.auto_configured.isChecked():
+                    self._history_conversion_roots.add(str(settings.output_root))
                 self.recording.recording_started()
         except (ValueError, OSError) as error:
             self._error(str(error))
@@ -232,6 +294,7 @@ class MainWindow(QMainWindow):
         self.result_received = True
         self.recording.render_snapshot(report)
         self.recording.recording_finished()
+        self._refresh_history()
 
     @Slot()
     def _start_demo(self):
@@ -260,6 +323,7 @@ class MainWindow(QMainWindow):
     def _state(self, state):
         self.recording.apply_state(state)
         if self.operational:
+            self.settings_bridge.apply_recording_if_idle()
             self.statusBar().showMessage(self.tr('Этап: {phase} | {mode}').format(
                 phase=state['phase'], mode='MOCK' if state['mock'] else self.tr('Приёмник')))
             self.settings.polling.setEnabled(not state['busy'] and not state['closing'])
@@ -295,7 +359,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         complete = self.coordinator.shutdown_complete
         if self.operational:
-            complete = complete and self.conversion_coordinator.shutdown_complete
+            complete = complete and all(c.shutdown_complete for c in (self.conversion_coordinator, self.history_coordinator, self.settings_bridge))
         if complete:
             event.accept()
             return
@@ -303,6 +367,8 @@ class MainWindow(QMainWindow):
         if self._close_requested:
             return
         if self.operational:
+            if not self.settings_bridge.confirm_close():
+                return
             cancel_manual = False
             if self.coordinator.busy or self.conversion_coordinator.busy:
                 answer = QMessageBox.question(
@@ -318,6 +384,8 @@ class MainWindow(QMainWindow):
             self._close_requested = True
             self.conversion_coordinator.request_shutdown(cancel=cancel_manual)
             self.coordinator.request_shutdown()
+            self.history_coordinator.request_shutdown()
+            self.settings_bridge.request_shutdown()
             return
         if self.coordinator.busy:
             if self.operational:

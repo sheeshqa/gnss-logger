@@ -52,6 +52,11 @@ class IntegrationTests(unittest.TestCase):
                 owner.coordinator.request_shutdown()
                 self.wait(lambda: owner.coordinator.shutdown_complete and
                           owner.conversion_coordinator.shutdown_complete)
+                # Stage 4.5 adds history/settings IO owners. Await their actual
+                # shutdown before deleteLater and TemporaryDirectory cleanup.
+                owner.close()
+                self.wait(lambda: owner.history_coordinator.shutdown_complete and
+                          owner.settings_bridge.shutdown_complete)
             else:
                 owner.request_shutdown(cancel=True)
                 self.wait(lambda: owner.shutdown_complete)

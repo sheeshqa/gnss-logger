@@ -2,16 +2,29 @@
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='GNSS Logger: recording and UBX to RINEX conversion GUI')
     parser.add_argument('--mock', action='store_true', help='synthetic receiver and real recorder with injected source; no COM')
+    parser.add_argument('--mock-root', help='persistent mock directory beneath the temporary GNSS-GUI-MOCK directory')
     parser.add_argument('--smoke-test', action='store_true', help='automated mock lifecycle and exit')
     args = parser.parse_args(argv)
     if args.smoke_test and not args.mock:
         parser.error('--smoke-test requires --mock')
+    mock_root = None
+    if args.mock_root:
+        if not args.mock:
+            parser.error('--mock-root requires --mock')
+        candidate = Path(args.mock_root).expanduser()
+        if not candidate.is_absolute():
+            parser.error('--mock-root must be absolute')
+        mock_root = candidate.resolve()
+        sandbox = (Path(tempfile.gettempdir()) / 'GNSS-GUI-MOCK').resolve()
+        if mock_root == sandbox or not mock_root.is_relative_to(sandbox):
+            parser.error('--mock-root must be a child of ' + str(sandbox))
     if not (3, 10) <= sys.version_info[:2] < (3, 16):
         message = 'GUI requires Python 3.10–3.15; the independent CLI remains available.'
         if sys.stderr is not None:
@@ -36,7 +49,7 @@ def main(argv=None):
     app = QApplication([sys.argv[0]])
     app.setApplicationName('GNSS Logger')
     app.setOrganizationName('GNSS Logger')
-    window = MainWindow(MockReceiverBackend() if args.mock else ReceiverBackend(), operational=True)
+    window = MainWindow(MockReceiverBackend() if args.mock else ReceiverBackend(), operational=True, mock_root=mock_root)
     window.show()
     smoke = {'heartbeat': 0, 'identified': False, 'started': False, 'stopped': False, 'timeout': False}
     if args.smoke_test:

@@ -50,6 +50,8 @@ class ConversionGuiTests(unittest.TestCase):
             self.wait_for(lambda: window.conversion_coordinator.shutdown_complete
                           and window.coordinator.shutdown_complete)
             window.close()
+            self.wait_for(lambda: window.history_coordinator.shutdown_complete
+                          and window.settings_bridge.shutdown_complete)
             window.deleteLater()
         for page in self.pages:
             page.deleteLater()
@@ -66,7 +68,8 @@ class ConversionGuiTests(unittest.TestCase):
         provider = MockReceiverBackend(interval=.01)
         window = MainWindow(provider, operational=True, conversion_backend=self.backend)
         self.windows.append(window)
-        self.wait_for(lambda: not window.conversion_coordinator.busy)
+        self.wait_for(lambda: not window.conversion_coordinator.busy
+                      and not window.settings_bridge.busy)
         window.show()
         return window
 

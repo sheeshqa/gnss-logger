@@ -91,10 +91,19 @@ class ConversionPage(QWidget):
         self.toml_path = QLineEdit()
         self.toml_browse = QPushButton(self.tr('Выбрать TOML'))
         self.load_button = QPushButton(self.tr('Загрузить'))
+        self.save_profile = QPushButton(self.tr('Сохранить TOML'))
+        self.save_profile_as = QPushButton(self.tr('Сохранить как…'))
+        self.reset_profile = QPushButton(self.tr('Профиль по умолчанию'))
         row = QHBoxLayout()
         for widget in (self.toml_path, self.toml_browse, self.load_button):
             row.addWidget(widget)
         form.addRow(self.tr('Конфигурация'), row)
+        profile_actions = QHBoxLayout()
+        for button in (self.save_profile, self.save_profile_as, self.reset_profile):
+            profile_actions.addWidget(button)
+        form.addRow(profile_actions)
+        self.dirty_label = QLabel()
+        form.addRow(self.dirty_label)
         form.addRow(self.tr('Версия RINEX'), QLabel('3.02'))
         self.systems = {name: QCheckBox(name) for name in 'GREC'}
         self.groups = {name: QCheckBox(name) for name in GROUPS}
@@ -285,6 +294,8 @@ class ConversionPage(QWidget):
         self.source.setEnabled(not session and not closing)
         self.source_button.setEnabled(not session and not closing)
         self.toml_browse.setEnabled(not closing)
+        for button in (self.save_profile, self.save_profile_as, self.reset_profile):
+            button.setEnabled(not closing)
         self.open_directory.setEnabled(bool(self._directory and self._directory.is_dir()))
         self.open_report.setEnabled(bool(self._report and self._report.is_file()))
 

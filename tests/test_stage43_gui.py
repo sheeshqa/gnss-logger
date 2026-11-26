@@ -34,6 +34,7 @@ class ReceiverCoordinatorTests(unittest.TestCase):
         self.owners = []
         self.releases = []
         self.workers = []
+        self.windows = []
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
 
@@ -54,6 +55,15 @@ class ReceiverCoordinatorTests(unittest.TestCase):
     def tearDown(self):
         for release in self.releases:
             release.set()
+        for window in self.windows:
+            controllers = (window.coordinator, window.conversion_coordinator,
+                           window.history_coordinator, window.settings_bridge)
+            window.coordinator.request_shutdown()
+            window.conversion_coordinator.request_shutdown(cancel=True)
+            window.history_coordinator.request_shutdown()
+            window.settings_bridge.request_shutdown()
+            self.wait_for(lambda: all(controller.shutdown_complete for controller in controllers))
+            window.close()
         for owner in self.owners:
             owner.request_shutdown()
             self.wait_for(lambda: owner.shutdown_complete)
@@ -80,6 +90,7 @@ class ReceiverCoordinatorTests(unittest.TestCase):
 
     def operational_window(self):
         window = MainWindow(MockReceiverBackend(interval=0.01), operational=True)
+        self.windows.append(window)
         self.owners.append(window.coordinator)
         self.addCleanup(window.deleteLater)
         window.recording.output.setText(self.directory.name)
