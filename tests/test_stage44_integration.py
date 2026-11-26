@@ -1,5 +1,6 @@
 """Real conversion engine/queue behind the GUI; synthetic data and no COM."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -262,7 +263,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertFalse(handle.snapshot()['stop_requested'])
         self.wait(lambda: handle.snapshot()['recording']['accounting']['received'] > before)
         self.assertFalse(handle.snapshot()['auto_conversion']['enabled'])
-        self.assertFalse(page.auto_details.text().find('FAILED') < 0)
+        # The last-result label may legitimately advance to the initial
+        # control-only segment's SKIPPED report. The cumulative queue summary
+        # must retain the failure even after Auto admission is switched off.
+        summary = json.loads(page.auto_status.text().split(': ', 1)[1])
+        self.assertEqual(summary['statuses'].get('FAILED'), 1)
         recording.stop_recording()
         self.wait(lambda: not recording.busy)
         report = window.latest_record_report

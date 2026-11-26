@@ -1,6 +1,6 @@
 # GNSS Logger 0.5.0.dev2
 
-## GUI Stage 4.5a–b — история и настройки
+## GUI Stage 4.5 — интерфейс, история и настройки
 
 Добавлены главное окно с разделами «Запись», «Конвертация», «История», «Настройки»
 и явно обозначенный mock-режим. Подключены выбор порта, MON-VER, read-only диагностика,
@@ -23,7 +23,10 @@ python -m gnss_logger.gui --mock --smoke-test
 После установки доступен также `gnss-logger-gui --mock`. Без `--mock` запускается
 режим работы с приёмником без автоматического открытия порта. Без optional extra возвращается
 понятное сообщение и code 2, а не попытка установки зависимостей.
-См. [контрольную точку Stage 4.5a–b](docs/stage4_5_ab_report.md),
+См. [руководство пользователя](docs/user_guide_ru.md),
+[итог Stage 4.5c–d](docs/stage4_5_report.md),
+[сборку и ограничения поставки](docs/stage4_5_build_report.md),
+[контрольную точку Stage 4.5a–b](docs/stage4_5_ab_report.md),
 [отчёт Stage 4.4](docs/stage4_4_report.md), [отчёт Stage 4.3](docs/stage4_3_report.md), [отчёт Stage 4.2](docs/stage4_2_report.md)
 и [экспериментальную сборку Stage 4.2](docs/stage4_2_build.md), не включающую новые возможности.
 
@@ -41,7 +44,8 @@ python -m gnss_logger convert --config .\conversion.local.toml --input 'D:\GNSS 
 Настройка, проверка файлов и ограничения описаны в [контрактах Stage 3.1](docs/stage3_1_contracts.md).
 Результаты проверок приведены в [отчёте Stage 3.1](docs/stage3_1_test_report.md).
 
-Read-only CLI для ZED-F9P / ZED-X20P: Serial, Replay и Mock. GUI отсутствует.
+Историческая контрольная точка Stage 1: read-only CLI для ZED-F9P / ZED-X20P,
+Serial, Replay и Mock; на этой контрольной точке GUI ещё отсутствовал.
 **Stage 1 0.3.0 принят пользователем после аппаратного ретеста PASS WITH LIMITATIONS.**
 Новый `record` реализует таймер/непрерывный режим, один COM reader, ограниченную очередь,
 первичный журнал всех возвращённых байтов и финализацию с SHA-256/учётом/manifest.

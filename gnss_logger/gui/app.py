@@ -11,7 +11,13 @@ def main(argv=None):
     parser.add_argument('--mock', action='store_true', help='synthetic receiver and real recorder with injected source; no COM')
     parser.add_argument('--mock-root', help='persistent mock directory beneath the temporary GNSS-GUI-MOCK directory')
     parser.add_argument('--smoke-test', action='store_true', help='automated mock lifecycle and exit')
+    parser.add_argument('--acceptance-smoke', type=Path, help='write isolated mock acceptance JSON report')
+    parser.add_argument('--smoke-images', type=Path, help='directory for mock acceptance screenshots')
     args = parser.parse_args(argv)
+    if args.acceptance_smoke and (not args.mock or args.smoke_test):
+        parser.error('--acceptance-smoke requires --mock and cannot be combined with --smoke-test')
+    if args.smoke_images and not args.acceptance_smoke:
+        parser.error('--smoke-images requires --acceptance-smoke')
     if args.smoke_test and not args.mock:
         parser.error('--smoke-test requires --mock')
     mock_root = None
@@ -49,8 +55,26 @@ def main(argv=None):
     app = QApplication([sys.argv[0]])
     app.setApplicationName('GNSS Logger')
     app.setOrganizationName('GNSS Logger')
+    # Inno Setup checks this presence marker before replacing application files.
+    # It is not a single-instance restriction and does not replace DeviceRegistry.
+    mutex = None
+    if sys.platform == 'win32':
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+        kernel.CreateMutexW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        mutex = kernel.CreateMutexW(None, False, 'Local\\GNSSLogger.GUI')
+        if not mutex:
+            raise ctypes.WinError(ctypes.get_last_error())
     window = MainWindow(MockReceiverBackend() if args.mock else ReceiverBackend(), operational=True, mock_root=mock_root)
     window.show()
+    if args.acceptance_smoke:
+        from .acceptance import run_acceptance
+        run_acceptance(app, window, args.acceptance_smoke.resolve(),
+                       (args.smoke_images or args.acceptance_smoke.parent / 'images').resolve())
     smoke = {'heartbeat': 0, 'identified': False, 'started': False, 'stopped': False, 'timeout': False}
     if args.smoke_test:
         mock_root = window.mock_root
@@ -84,7 +108,11 @@ def main(argv=None):
         timer.start()
         QTimer.singleShot(0, window.coordinator.refresh_devices)
         QTimer.singleShot(15000, timeout)
-    code = app.exec()
+    try:
+        code = app.exec()
+    finally:
+        if mutex:
+            kernel.CloseHandle(mutex)
     if args.smoke_test:
         report = getattr(window, 'latest_record_report', None) or {}
         detail = report.get('extensions', {}).get('gnss_logger.recording', {})

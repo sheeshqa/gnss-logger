@@ -154,7 +154,9 @@ class HistoryPage(_LegacyHistoryPage):
                       conversion.get('status'), ', '.join(s['match'] for s in conversion.get('segments', [])),
                       conversion]
             for column, value in enumerate(values):
-                self.conversion_table.setItem(row, column, QTableWidgetItem(display(value)))
+                item = QTableWidgetItem(display(value))
+                item.setToolTip(item.text())
+                self.conversion_table.setItem(row, column, item)
         self.conversion_table.blockSignals(False)
         self._filter()
 
@@ -192,6 +194,7 @@ class HistoryPage(_LegacyHistoryPage):
                 item = QTableWidgetItem()
                 item.setData(Qt.ItemDataRole.DisplayRole, value if type(value) in (int, float) else display(value))
                 item.setData(Qt.ItemDataRole.UserRole, session['session_key'])
+                item.setToolTip(item.text())
                 self.table.setItem(row, column, item)
         self.table.setSortingEnabled(True)
         self.table.blockSignals(False)

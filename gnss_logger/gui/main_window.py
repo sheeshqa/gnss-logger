@@ -5,6 +5,7 @@ import tempfile
 from uuid import uuid4
 
 from PySide6.QtCore import QThread, Qt, Slot
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QMainWindow,
                                QMessageBox, QPlainTextEdit, QScrollArea,
                                QStackedWidget, QVBoxLayout, QWidget)
@@ -14,6 +15,8 @@ from .pages.conversion import ConversionPage
 from .pages.history import HistoryPage
 from .pages.recording import RecordingPage
 from .pages.settings import SettingsPage
+from .. import __version__
+from .presentation import STYLE, application_icon, polish_page, status_text
 
 
 class MainWindow(QMainWindow):
@@ -22,13 +25,16 @@ class MainWindow(QMainWindow):
         self.operational = operational
         self.setWindowTitle(self.tr('GNSS Logger — Stage 4.2') + (' — MOCK' if provider else ''))
         self.resize(1100, 750)
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(760, 540)
+        self.setWindowIcon(application_icon())
         if operational:
             from .receiver_coordinator import ReceiverCoordinator
             self.coordinator = ReceiverCoordinator(provider, self)
             self.setWindowTitle(self.tr('GNSS Logger — Этап 4.4') + (' — MOCK' if provider.is_mock else ''))
         else:
             self.coordinator = Coordinator(provider, self)
+        self.setWindowTitle('GNSS Logger ' + __version__ + (' — MOCK' if
+            (provider.is_mock if operational else provider is not None) else ''))
         self.last_events = []
         self.latest_record_report = None
         self.result_received = False
@@ -48,6 +54,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(banner)
         content = QHBoxLayout()
         self.sidebar = QListWidget()
+        self.sidebar.setObjectName('navigation')
         self.sidebar.setAccessibleName(self.tr('Разделы приложения'))
         self.sidebar.addItems([self.tr('Запись'), self.tr('Конвертация'),
                                self.tr('История'), self.tr('Настройки')])
@@ -70,6 +77,7 @@ class MainWindow(QMainWindow):
         self.history = HistoryPage(operational=operational)
         self.settings = SettingsPage(operational=operational)
         for page in (self.recording, self.conversion, self.history, self.settings):
+            polish_page(page)
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(page)
@@ -83,9 +91,26 @@ class MainWindow(QMainWindow):
         self.log.setAccessibleName(self.tr('События интерфейса'))
         outer.addWidget(self.log)
         self.setCentralWidget(central)
-        self.setStyleSheet('QLabel#pageTitle { font-size: 22px; font-weight: 600; } '
-                           'QLabel#modeBanner { padding: 8px; background: #e7eef5; color: #18232f; } '
-                           'QPushButton { padding: 6px; }')
+        self.setStyleSheet(STYLE)
+        self.persistent_status = QLabel()
+        self.persistent_status.setObjectName('persistentStatus')
+        self.persistent_status.setWordWrap(True)
+        self.persistent_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.persistent_status.setAccessibleName(self.tr('Состояние операций'))
+        self.statusBar().addPermanentWidget(self.persistent_status, 1)
+        self.version_status = QLabel(__version__)
+        self.statusBar().addPermanentWidget(self.version_status)
+        navigation = self.menuBar().addMenu(self.tr('Разделы'))
+        for index in range(4):
+            action = QAction(self.sidebar.item(index).text(), self)
+            action.setShortcut(QKeySequence('Ctrl+' + str(index + 1)))
+            action.triggered.connect(lambda checked=False, row=index: self.sidebar.setCurrentRow(row))
+            navigation.addAction(action)
+        help_menu = self.menuBar().addMenu(self.tr('Справка'))
+        self.about_action = QAction(self.tr('О программе'), self)
+        self.about_action.setShortcut(QKeySequence('F1'))
+        self.about_action.triggered.connect(self._about)
+        help_menu.addAction(self.about_action)
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
         self.sidebar.setCurrentRow(0)
         self.recording.refresh.clicked.connect(self.coordinator.refresh_devices)
@@ -101,6 +126,7 @@ class MainWindow(QMainWindow):
             self.conversion_coordinator.settings_loaded.connect(self.conversion.set_settings)
             self.conversion_coordinator.error_raised.connect(self._error)
             self.conversion_coordinator.state_changed.connect(self.conversion.apply_state)
+            self.conversion_coordinator.state_changed.connect(lambda _: self._update_status())
             self.conversion_coordinator.events_ready.connect(self._conversion_events)
             self.conversion_coordinator.result_ready.connect(self.conversion.render_view)
             self.conversion_coordinator.result_ready.connect(lambda _: self._refresh_history())
@@ -153,6 +179,20 @@ class MainWindow(QMainWindow):
         self._state(self.coordinator.view())
         if operational:
             self.conversion_coordinator.load()
+
+    @Slot()
+    def _about(self):
+        QMessageBox.about(self, self.tr('О программе GNSS Logger'),
+            self.tr('GNSS Logger {version}\nЗапись GNSS и конвертация UBX → RINEX 3.02.\n'
+                    'Ctrl+1…4 — разделы; Tab / Shift+Tab — переход по элементам.\n'
+                    'MOCK использует синтетические данные.').format(version=__version__))
+
+    def _update_status(self, state=None):
+        state = self.coordinator.view() if state is None else state
+        manual = self.conversion_coordinator.view() if hasattr(self, 'conversion_coordinator') else None
+        text = status_text(state, manual)
+        self.persistent_status.setText(text)
+        self.persistent_status.setToolTip(text)
 
     @Slot()
     def _maybe_close(self):
@@ -322,14 +362,11 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _state(self, state):
         self.recording.apply_state(state)
+        self._update_status(state)
         if self.operational:
             self.settings_bridge.apply_recording_if_idle()
-            self.statusBar().showMessage(self.tr('Этап: {phase} | {mode}').format(
-                phase=state['phase'], mode='MOCK' if state['mock'] else self.tr('Приёмник')))
             self.settings.polling.setEnabled(not state['busy'] and not state['closing'])
             return
-        self.statusBar().showMessage(self.tr('Этап: {phase} | {mode}').format(
-            phase=state['phase'], mode='MOCK' if state['mock'] else self.tr('Нет аппаратного backend')))
         self.settings.polling.setEnabled(not state['busy'] and not state['closing'])
 
     @Slot(object)

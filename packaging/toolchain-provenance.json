@@ -1,0 +1,17 @@
+{
+  "inno_setup": {
+    "version": "6.7.4",
+    "official_index": "https://jrsoftware.org/isdl.php",
+    "download": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe",
+    "installer_sha256": "a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c",
+    "compiler_sha256": "f02fa0e5f237b47d7ed1edae9b991866ec94fe02af61eb6a73e94f92fe8e0604",
+    "authenticode_status_at_acquisition": "Valid",
+    "signer": "CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL",
+    "acquired_utc_date": "2026-11-26",
+    "installation": "per-user, dedicated local toolchain directory, no administrator"
+  },
+  "python": "CPython 3.15.1 x64",
+  "wheel_source": "https://pypi.org/simple",
+  "wheel_lock": "build-requirements.lock",
+  "scope": "private local evaluation; public release blocked"
+}
