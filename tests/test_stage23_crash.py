@@ -13,7 +13,7 @@ from gnss_logger.capture.names import reserve
 CHILD = r'''
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-import json, sys, uuid
+import json, os, sys, uuid
 from gnss_logger.recording.projection import Projection
 from gnss_logger.recording.storage import PrimaryJournal
 from gnss_logger.recording.contracts import InputChunk
@@ -31,7 +31,8 @@ for i in range(count):
     j.sync();p.sync_receipts(j.synced);p.advance()
 snapshot=p.checkpoint()
 write_new_json(internal/'checkpoint-test.json',snapshot)
-write_new_json(root/'ready.json',dict(synced=j.synced,sha256=j.digest.hexdigest()))
+write_new_json(root/'ready.json',dict(pid=os.getpid(),synced=j.synced,sha256=j.digest.hexdigest()))
+(root/'ready.marker').touch()  # ready.json is closed before exposing the barrier.
 sys.stdin.read()  # Test parent kills this process; production does not use this barrier.
 '''
 
@@ -42,13 +43,19 @@ class CrashTests(unittest.TestCase):
         for count in (2,4):
             with self.subTest(epochs=count), tempfile.TemporaryDirectory() as tmp:
                 root=Path(tmp)
-                child=subprocess.Popen([sys.executable,'-B','-c',CHILD,str(root),str(count)],
+                executable = str(getattr(sys, '_base_executable', None) or sys.executable)
+                child=subprocess.Popen([executable,'-B','-c',CHILD,str(root),str(count)],
                     stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
                 try:
                     deadline=time.monotonic()+10
-                    while not (root/'ready.json').exists() and child.poll() is None and time.monotonic()<deadline:
+                    ready = None
+                    while child.poll() is None and time.monotonic()<deadline:
+                        if (root/'ready.marker').exists():
+                            ready = json.loads((root/'ready.json').read_text())
+                            break
                         time.sleep(.01)
-                    self.assertTrue((root/'ready.json').exists(),'Child never reached durable checkpoint')
+                    self.assertIsNotNone(ready,'Child never reached durable checkpoint')
+                    self.assertEqual(ready['pid'], child.pid, 'Must kill the recorder, not a venv launcher')
                     child.kill()
                     out,error=child.communicate(timeout=10)
                     self.assertNotEqual(child.returncode,0)

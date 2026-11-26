@@ -10,6 +10,7 @@ from unittest.mock import patch
 from gnss_logger.cli import main, read_stream
 from gnss_logger.device.transport import open_port
 from gnss_logger.device.ubx import MON_VER_POLL, UBXParser, checksum, rawx
+from gnss_logger.device.ubx import sfrbx
 from gnss_logger.diagnostics import Diagnostics
 
 
@@ -26,6 +27,22 @@ def epoch(tow=100.0, week=2400, lock=1000, status=1, version=1, track=7):
 
 
 NAV = frame(2, 0x13, bytes((0, 3, 0, 0, 1, 0, 2, 0)) + bytes(4))
+
+
+def sfrbx_frame(num_words=1, payload_length=None, checksum_delta=0):
+    payload = bytes((3, 12, 6, 0, num_words, 0, 2, 0)) + bytes(4 * num_words)
+    if payload_length is not None:
+        payload = payload[:payload_length]
+    result = bytearray(frame(2, 0x13, payload))
+    result[-1] ^= checksum_delta
+    return bytes(result)
+
+
+def nmea_sentence(body=b"GNGGA,1,2"):
+    value = 0
+    for byte in body:
+        value ^= byte
+    return b"$" + body + b"*" + f"{value:02X}".encode() + b"\r\n"
 
 
 class FakePort:
@@ -64,13 +81,15 @@ class Clock:
 
 class ProtocolTests(unittest.TestCase):
     def test_all_chunk_boundaries_and_mixed_stream(self):
-        stream = b"$GNGGA,noise\r\n" + epoch() + NAV
+        stream = nmea_sentence() + epoch() + NAV
         for boundary in range(len(stream) + 1):
             d = Diagnostics()
             d.feed(stream[:boundary])
             d.feed(stream[boundary:])
             self.assertEqual((d.rawx_count, d.sfrbx_count, d.code_valid, d.phase_valid), (1, 1, 1, 1))
-            self.assertEqual(d.parser.discarded_bytes, 14)
+            self.assertEqual(d.parser.discarded_bytes, 0)
+            self.assertEqual(d.parser.nmea_messages, 1)
+            self.assertEqual(d.parser.nmea_bytes, len(nmea_sentence()))
             self.assertEqual(d.report()["RAWX"]["signal_quality"]["0:0"]["satellites"], [3])
 
     def test_bytewise_checksum_recovery(self):
@@ -102,6 +121,61 @@ class ProtocolTests(unittest.TestCase):
         d.feed(epoch(version=3) + frame(2, 0x15, bytes(16)) + frame(2, 0x13, bytes(8)))
         self.assertEqual(d.rawx_count + d.sfrbx_count, 0)
         self.assertEqual(sum(d.decode_errors.values()), 3)
+
+    def test_sfrbx_x20p_nineteen_words(self):
+        d = Diagnostics()
+        d.feed(sfrbx_frame(19))
+        self.assertEqual(d.sfrbx_count, 1)
+        self.assertEqual(d.nav_signals["3:6"], 1)
+
+    def test_sfrbx_length_mismatch_is_not_counted(self):
+        d = Diagnostics()
+        d.feed(sfrbx_frame(19, payload_length=83))
+        self.assertEqual(d.sfrbx_count, 0)
+        self.assertEqual(dict(d.decode_errors), {
+            "02-13: Invalid SFRBX word count or payload length": 1})
+
+    def test_nmea_bytewise_tokens_remain_lossless_including_split_crlf(self):
+        sentence = nmea_sentence()
+        stream = b'noise' + sentence + epoch() + sentence + NAV
+        parser = UBXParser()
+        emitted = bytearray()
+        for index, byte in enumerate(stream):
+            emitted.extend(b''.join(raw for raw, _ in parser.feed_records(bytes((byte,)))))
+            self.assertEqual(bytes(emitted) + bytes(parser.buffer), stream[:index + 1])
+        self.assertEqual(bytes(emitted), stream)
+        self.assertEqual(parser.nmea_messages, 2)
+        self.assertEqual(parser.nmea_bytes, 2 * len(sentence))
+        self.assertEqual(parser.discarded_bytes, 5)
+        self.assertEqual(parser.buffer, b'')
+
+    def test_unterminated_nmea_buffer_stays_bounded_and_recovers(self):
+        parser = UBXParser()
+        emitted = bytearray()
+        stream = b'$' + b'x' * 1000 + NAV
+        for byte in stream:
+            emitted.extend(b''.join(raw for raw, _ in parser.feed_records(bytes((byte,)))))
+            self.assertLessEqual(len(parser.buffer), 90)
+        self.assertEqual(bytes(emitted) + bytes(parser.buffer), stream)
+        self.assertEqual(parser.discarded_bytes, 1001)
+        self.assertEqual(parser.nmea_messages, 0)
+
+    def test_sfrbx_checksum_is_still_verified(self):
+        d = Diagnostics()
+        d.feed(sfrbx_frame(19, checksum_delta=1))
+        self.assertEqual(d.sfrbx_count, 0)
+        self.assertEqual(d.parser.bad_checksums, 1)
+
+    def test_f9p_sfrbx_shape_remains_supported(self):
+        self.assertEqual(sfrbx(sfrbx_frame(10)[6:-2]), {
+            "gnss_id": 3, "sv_id": 12, "sig_id": 6, "freq_id": 0, "num_words": 10})
+
+    def test_invalid_nmea_remains_discarded(self):
+        d = Diagnostics()
+        d.feed(b"$GNGGA,invalid*00\r\n" + NAV)
+        self.assertEqual(d.parser.nmea_messages, 0)
+        self.assertEqual(d.parser.nmea_bytes, 0)
+        self.assertGreater(d.parser.discarded_bytes, 0)
 
     def test_nonfinite_tow_rejected(self):
         d = Diagnostics()

@@ -143,6 +143,7 @@ class Diagnostics:
             messages=dict(self.messages), decode_errors=dict(self.decode_errors),
             checksum_errors=self.parser.bad_checksums,
             discarded_bytes=self.parser.discarded_bytes,
+            nmea=dict(messages=self.parser.nmea_messages, bytes=self.parser.nmea_bytes),
             oversize_headers=self.parser.oversize_headers,
             pending_bytes=len(self.parser.buffer),
             RAWX=dict(status="observed" if self.rawx_count else "not_observed",

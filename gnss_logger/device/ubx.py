@@ -1,5 +1,6 @@
 """Clean-room UBX framing; bounded memory, checksum before decoding."""
 
+import re
 import struct
 
 
@@ -75,7 +76,35 @@ class UBXParser:
         self.buffer = bytearray()
         self.bad_checksums = 0
         self.discarded_bytes = 0
+        self.nmea_messages = 0
+        self.nmea_bytes = 0
         self.oversize_headers = 0
+
+    def _discard_opaque(self, data):
+        """Account for opaque bytes, excluding complete valid NMEA sentences."""
+        nmea = 0
+        for match in re.finditer(rb'\$(?:[A-Z]{2})[A-Z]{3},[^\r\n]*\*[0-9A-Fa-f]{2}\r\n', data):
+            sentence = match.group()
+            star = sentence.rfind(b'*')
+            expected = 0
+            for value in sentence[1:star]:
+                expected ^= value
+            if expected == int(sentence[star + 1:star + 3], 16):
+                self.nmea_messages += 1
+                nmea += len(sentence)
+        self.nmea_bytes += nmea
+        self.discarded_bytes += len(data) - nmea
+
+    @staticmethod
+    def _incomplete_nmea_start(data):
+        """Return a bounded suffix start for an NMEA sentence split across feeds."""
+        start = data.rfind(b"$")
+        # CRLF can itself straddle feeds: a final CR is still an incomplete
+        # sentence, but an embedded line ending is not a resumable suffix.
+        if (start >= 0 and len(data) - start < 90
+                and b"\n" not in data[start:] and b"\r" not in data[start:-1]):
+            return start
+        return None
 
     def feed(self, data):
         return [frame for _, frame in self.feed_records(data) if frame is not None]
@@ -87,15 +116,18 @@ class UBXParser:
         while self.buffer:
             pos = self.buffer.find(b"\xb5\x62")
             if pos < 0:
-                keep = int(self.buffer[-1] == 0xB5)
+                opaque = bytes(self.buffer)
+                nmea_start = self._incomplete_nmea_start(opaque)
+                keep = (len(opaque) - nmea_start if nmea_start is not None
+                        else int(self.buffer[-1] == 0xB5))
                 if len(self.buffer) - keep:
                     frames.append((bytes(self.buffer[:len(self.buffer) - keep]), None))
-                self.discarded_bytes += len(self.buffer) - keep
-                self.buffer[:] = self.buffer[-1:] if keep else b""
+                self._discard_opaque(opaque[:len(opaque) - keep])
+                self.buffer[:] = self.buffer[-keep:] if keep else b""
                 break
             if pos:
                 frames.append((bytes(self.buffer[:pos]), None))
-                self.discarded_bytes += pos
+                self._discard_opaque(bytes(self.buffer[:pos]))
                 del self.buffer[:pos]
             if len(self.buffer) < 6:
                 break
@@ -167,9 +199,10 @@ def rawx(payload):
 
 
 def sfrbx(payload):
-    if len(payload) < 8 or payload[6] != 2 or len(payload) != 8 + 4 * payload[4]:
+    if len(payload) < 8 or payload[6] != 2:
         raise ValueError("Unsupported SFRBX version or inconsistent numWords")
-    if not 1 <= payload[4] <= 16:
-        raise ValueError("Invalid SFRBX word count")
+    num_words = payload[4]
+    if not 1 <= num_words or len(payload) != 8 + 4 * num_words:
+        raise ValueError("Invalid SFRBX word count or payload length")
     return dict(gnss_id=payload[0], sv_id=payload[1], sig_id=payload[2],
-                freq_id=payload[3], num_words=payload[4])
+                freq_id=payload[3], num_words=num_words)

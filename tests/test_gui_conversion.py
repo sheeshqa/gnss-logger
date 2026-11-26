@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 import subprocess
 import sys
+import time
 from threading import Event, Thread
 from unittest import TestCase
 from unittest.mock import patch
@@ -143,6 +144,8 @@ class GuiConversionTests(TestCase):
 
     def test_real_child_timeout_and_cancel_reap(self):
         original_popen = subprocess.Popen
+        # Windows venv python.exe is a redirector, not the payload process.
+        executable = str(getattr(sys, '_base_executable', None) or sys.executable)
         for cancelling in (False, True):
             cancel = Event()
             started = Event()
@@ -153,20 +156,37 @@ class GuiConversionTests(TestCase):
                 started.set()
                 return child
             outcome = []
+            ready = self.root / ('cancel-child.pid' if cancelling else 'timeout-child.pid')
+            marker = ready.with_suffix('.ready')
+            code = ("from pathlib import Path; import os,sys,time; "
+                    "pid=Path(sys.argv[1]); pid.write_text(str(os.getpid())); "
+                    "pid.with_suffix('.ready').touch(); time.sleep(60)")
             def run():
                 try:
-                    outcome.append(invoke([sys.executable,'-c','import time; time.sleep(60)'],
+                    outcome.append(invoke([executable,'-c',code,str(ready)],
                                           self.root,.2 if not cancelling else 30,cancel))
                 except KeyboardInterrupt:
                     outcome.append('cancelled')
             with patch('gnss_logger.conversion.engine.subprocess.Popen',spawn):
                 thread = Thread(target=run)
                 thread.start()
-                self.assertTrue(started.wait(3))
-                if cancelling:
+                try:
+                    self.assertTrue(started.wait(3))
+                    if cancelling:
+                        deadline = time.monotonic() + 3
+                        pid = None
+                        while time.monotonic() < deadline:
+                            if marker.exists():
+                                pid = int(ready.read_text())
+                                break
+                            time.sleep(.01)
+                        self.assertEqual(pid, children[0].pid, 'Must cancel the actual payload, not a launcher')
+                        cancel.set()
+                    thread.join(4)
+                    self.assertFalse(thread.is_alive())
+                finally:
                     cancel.set()
-                thread.join(4)
-                self.assertFalse(thread.is_alive())
+                    thread.join(4)
             self.assertIsNotNone(children[0].poll())
             self.assertEqual(outcome[0], 'cancelled') if cancelling else self.assertTrue(outcome[0]['timed_out'])
 
